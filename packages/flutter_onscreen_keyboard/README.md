@@ -298,7 +298,7 @@ final theme = OnscreenKeyboardThemeData(
 
 ### Custom Layout
 
-#### Quick Layout Using `KeyboardLayout.custom`
+#### Quick Layout Using `KeyboardLayout.custom()`
 
 Use this approach when you want a simple, inline layout definition without creating a new class.
 
