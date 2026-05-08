@@ -1,3 +1,9 @@
+## 0.4.6
+
+ - **TEST**: add tests for extensions
+
+ - **DOCS**: update readme. ([7af2df04](https://github.com/albinpk/flutter_onscreen_keyboard/commit/7af2df041b8e4110f982023d2d10e90a9c94c831))
+
 ## 0.4.5
 
  - **test**: add more tests

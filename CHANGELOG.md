@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2026-05-08
+
+### Changes
+
+---
+
+Packages with breaking changes:
+
+ - There are no breaking changes in this release.
+
+Packages with other changes:
+
+ - [`flutter_onscreen_keyboard` - `v0.4.6`](#flutter_onscreen_keyboard---v046)
+
+---
+
+#### `flutter_onscreen_keyboard` - `v0.4.6`
+
+ - **TEST**: add tests for extensions
+
+ - **DOCS**: update readme. ([7af2df04](https://github.com/albinpk/flutter_onscreen_keyboard/commit/7af2df041b8e4110f982023d2d10e90a9c94c831))
+
+
 ## 2026-03-23
 
 ### Changes
