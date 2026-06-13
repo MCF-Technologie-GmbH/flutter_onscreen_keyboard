@@ -1,3 +1,7 @@
+## 0.4.7
+
+ - **FEAT**: update `OnscreenKeyboardTextField` to match latest `TextField`. ([ef0cca1f](https://github.com/albinpk/flutter_onscreen_keyboard/commit/ef0cca1f0cc23bf8ada1ad1153bdc79a37e95fff))
+
 ## 0.4.6
 
  - **TEST**: add tests for extensions
