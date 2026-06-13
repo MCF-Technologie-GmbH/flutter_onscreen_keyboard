@@ -58,7 +58,7 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     this.statesController,
     this.obscuringCharacter = '•',
     this.obscureText = false,
-    this.autocorrect = true,
+    this.autocorrect,
     this.smartDashesType,
     this.smartQuotesType,
     this.enableSuggestions = true,
@@ -80,12 +80,13 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     this.cursorOpacityAnimates,
     this.cursorColor,
     this.cursorErrorColor,
-    this.selectionHeightStyle = ui.BoxHeightStyle.tight,
-    this.selectionWidthStyle = ui.BoxWidthStyle.tight,
+    this.selectionHeightStyle,
+    this.selectionWidthStyle,
     this.keyboardAppearance,
     this.scrollPadding = const EdgeInsets.all(20),
     this.dragStartBehavior = DragStartBehavior.start,
     this.enableInteractiveSelection,
+    this.selectAllOnFocus,
     this.selectionControls,
     this.onTap,
     this.onTapAlwaysCalled = false,
@@ -107,12 +108,12 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     this.stylusHandwritingEnabled =
         EditableText.defaultStylusHandwritingEnabled,
     this.enableIMEPersonalizedLearning = true,
+    this.enableInlinePrediction,
     this.contextMenuBuilder = _defaultContextMenuBuilder,
     this.canRequestFocus = true,
     this.spellCheckConfiguration,
     this.magnifierConfiguration,
     this.hintLocales,
-    this.selectAllOnFocus,
   });
 
   /// Enables or disables the automatic onscreen keyboard behavior.
@@ -281,7 +282,7 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   final bool obscureText;
 
   /// {@macro flutter.widgets.editableText.autocorrect}
-  final bool autocorrect;
+  final bool? autocorrect;
 
   /// {@macro flutter.services.TextInputConfiguration.smartDashesType}
   final SmartDashesType? smartDashesType;
@@ -334,6 +335,8 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   /// greater than 0, it will also display the maximum number allowed. If set
   /// to [TextField.noMaxLength] then only the current character count
   /// is displayed.
+  /// To remove the counter, set [InputDecoration.counterText] to an empty
+  /// string or return null from [TextField.buildCounter] callback.
   ///
   /// After [maxLength] characters have been input, additional input
   /// is ignored, unless [maxLengthEnforcement] is set to
@@ -400,6 +403,27 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   ///
   /// If non-null this property overrides the [decoration]'s
   /// [InputDecoration.enabled] property.
+  ///
+  /// When a text field is disabled, all of its children widgets are also
+  /// disabled, including the [InputDecoration.suffixIcon]. If you need to keep
+  /// the suffix icon interactive while disabling the text field, consider using
+  /// [readOnly] and [enableInteractiveSelection] instead:
+  ///
+  /// ```dart
+  /// TextField(
+  ///   enabled: true,
+  ///   readOnly: true,
+  ///   enableInteractiveSelection: false,
+  ///   decoration: InputDecoration(
+  ///     suffixIcon: IconButton(
+  ///       onPressed: () {
+  ///         // This will work because the TextField is enabled
+  ///       },
+  ///       icon: const Icon(Icons.edit_outlined),
+  ///     ),
+  ///   ),
+  /// )
+  /// ```
   final bool? enabled;
 
   /// Determines whether this widget ignores pointer events.
@@ -441,12 +465,12 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   /// Controls how tall the selection highlight boxes are computed to be.
   ///
   /// See [ui.BoxHeightStyle] for details on available styles.
-  final ui.BoxHeightStyle selectionHeightStyle;
+  final ui.BoxHeightStyle? selectionHeightStyle;
 
   /// Controls how wide the selection highlight boxes are computed to be.
   ///
   /// See [ui.BoxWidthStyle] for details on available styles.
-  final ui.BoxWidthStyle selectionWidthStyle;
+  final ui.BoxWidthStyle? selectionWidthStyle;
 
   /// The appearance of the keyboard.
   ///
@@ -460,6 +484,9 @@ class OnscreenKeyboardTextField extends StatefulWidget {
 
   /// {@macro flutter.widgets.editableText.enableInteractiveSelection}
   final bool? enableInteractiveSelection;
+
+  /// {@macro flutter.widgets.editableText.selectAllOnFocus}
+  final bool? selectAllOnFocus;
 
   /// {@macro flutter.widgets.editableText.selectionControls}
   final TextSelectionControls? selectionControls;
@@ -618,6 +645,9 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   /// {@macro flutter.services.TextInputConfiguration.enableIMEPersonalizedLearning}
   final bool enableIMEPersonalizedLearning;
 
+  /// {@macro flutter.services.TextInputConfiguration.enableInlinePrediction}
+  final bool? enableInlinePrediction;
+
   /// {@macro flutter.widgets.editableText.contentInsertionConfiguration}
   final ContentInsertionConfiguration? contentInsertionConfiguration;
 
@@ -642,25 +672,14 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   /// {@macro flutter.widgets.undoHistory.controller}
   final UndoHistoryController? undoController;
 
-  /// {@macro flutter.widgets.EditableText.spellCheckConfiguration}
-  ///
-  /// If [SpellCheckConfiguration.misspelledTextStyle] is not specified in this
-  /// configuration, then [TextField.materialMisspelledTextStyle] is used by
-  /// default.
-  final SpellCheckConfiguration? spellCheckConfiguration;
-
   /// {@macro flutter.services.TextInputConfiguration.hintLocales}
   final List<Locale>? hintLocales;
-
-  /// {@macro flutter.widgets.editableText.selectAllOnFocus}
-  final bool? selectAllOnFocus;
 
   static Widget _defaultContextMenuBuilder(
     BuildContext context,
     EditableTextState editableTextState,
   ) {
-    if (defaultTargetPlatform == TargetPlatform.iOS &&
-        SystemContextMenu.isSupported(context)) {
+    if (SystemContextMenu.isSupportedByField(editableTextState)) {
       return SystemContextMenu.editableText(
         editableTextState: editableTextState,
       );
@@ -669,6 +688,13 @@ class OnscreenKeyboardTextField extends StatefulWidget {
       editableTextState: editableTextState,
     );
   }
+
+  /// {@macro flutter.widgets.EditableText.spellCheckConfiguration}
+  ///
+  /// If [SpellCheckConfiguration.misspelledTextStyle] is not specified in this
+  /// configuration, then [TextField.materialMisspelledTextStyle] is used
+  /// by default.
+  final SpellCheckConfiguration? spellCheckConfiguration;
 
   @override
   State<OnscreenKeyboardTextField> createState() =>
@@ -816,6 +842,7 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
       toolbarOptions: widget.toolbarOptions,
       hintLocales: widget.hintLocales,
       selectAllOnFocus: widget.selectAllOnFocus,
+      enableInlinePrediction: widget.enableInlinePrediction,
     );
   }
 }
