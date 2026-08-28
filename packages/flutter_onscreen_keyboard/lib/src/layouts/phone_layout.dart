@@ -84,13 +84,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
             label: _german ? 'DE' : 'EN',
             flex: 26,
           ),
-          const OnscreenKeyboardKey.text(primary: ',', flex: 18),
-          const OnscreenKeyboardKey.text(
-            primary: ' ',
-            child: Icon(Icons.space_bar_rounded),
-            flex: 92,
-          ),
-          const OnscreenKeyboardKey.text(primary: '.', flex: 18),
+          ..._contextKeys,
           OnscreenKeyboardKey.action(
             name: ActionKeyType.enter,
             child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
@@ -100,6 +94,33 @@ class PhoneKeyboardLayout extends KeyboardLayout {
       ),
     ];
   }
+
+  List<OnscreenKeyboardKey> get _contextKeys =>
+      switch (fieldConfiguration?.inputKind) {
+        OnscreenKeyboardInputKind.email => const [
+          OnscreenKeyboardKey.text(primary: '@', flex: 24),
+          OnscreenKeyboardKey.text(
+            primary: ' ',
+            child: Icon(Icons.space_bar_rounded),
+            flex: 72,
+          ),
+          OnscreenKeyboardKey.text(primary: '.', flex: 20),
+        ],
+        OnscreenKeyboardInputKind.url => const [
+          OnscreenKeyboardKey.text(primary: '/', flex: 22),
+          OnscreenKeyboardKey.text(primary: ':', flex: 18),
+          OnscreenKeyboardKey.text(primary: '.com', flex: 52),
+        ],
+        _ => const [
+          OnscreenKeyboardKey.text(primary: ',', flex: 18),
+          OnscreenKeyboardKey.text(
+            primary: ' ',
+            child: Icon(Icons.space_bar_rounded),
+            flex: 92,
+          ),
+          OnscreenKeyboardKey.text(primary: '.', flex: 18),
+        ],
+      };
 
   List<KeyboardRow> get _symbolRows => [
     _row('1234567890'),

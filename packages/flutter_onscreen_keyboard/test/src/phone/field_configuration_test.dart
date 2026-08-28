@@ -42,4 +42,20 @@ void main() {
     expect((english[5] as TextKey).primary, 'y');
     expect((german[5] as TextKey).primary, 'z');
   });
+
+  test('adds field-specific email and URL utility keys', () {
+    final email = PhoneKeyboardLayout(
+      fieldConfiguration: OnscreenKeyboardFieldConfiguration.fromFlutter(
+        keyboardType: TextInputType.emailAddress,
+      ),
+    ).modes['letters']!.rows.last.keys.whereType<TextKey>();
+    final url = PhoneKeyboardLayout(
+      fieldConfiguration: OnscreenKeyboardFieldConfiguration.fromFlutter(
+        keyboardType: TextInputType.url,
+      ),
+    ).modes['letters']!.rows.last.keys.whereType<TextKey>();
+
+    expect(email.map((key) => key.primary), contains('@'));
+    expect(url.map((key) => key.primary), containsAll(['/', '.com']));
+  });
 }
