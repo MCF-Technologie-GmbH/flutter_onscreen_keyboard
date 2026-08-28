@@ -75,6 +75,71 @@ void main() {
     expect(find.text('hello'), findsOneWidget);
   });
 
+  testWidgets('reduced motion applies the dock inset without translation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: const OnscreenKeyboard(
+              presentation: OnscreenKeyboardPresentation.docked,
+              child: Scaffold(body: OnscreenKeyboardTextField()),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pump();
+
+    final animation = tester.widget<TweenAnimationBuilder<double>>(
+      find.byWidgetPredicate(
+        (widget) => widget is TweenAnimationBuilder<double>,
+      ),
+    );
+    expect(animation.duration, Duration.zero);
+    expect(animation.tween.end, greaterThan(200));
+  });
+
+  testWidgets('runtime configuration updates locale and typing mode', (
+    tester,
+  ) async {
+    var locale = const Locale('en');
+    var typingMode = OnscreenKeyboardTypingMode.suggestions;
+    late StateSetter update;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            update = setState;
+            return OnscreenKeyboard(
+              presentation: OnscreenKeyboardPresentation.docked,
+              locale: locale,
+              typingMode: typingMode,
+              child: const Scaffold(body: OnscreenKeyboardTextField()),
+            );
+          },
+        ),
+      ),
+    );
+    final controller = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    );
+
+    update(() {
+      locale = const Locale('de');
+      typingMode = OnscreenKeyboardTypingMode.autocorrect;
+    });
+    await tester.pump();
+
+    expect(controller.locale, const Locale('de'));
+    expect(controller.typingMode, OnscreenKeyboardTypingMode.autocorrect);
+    expect(controller.layout, isA<PhoneKeyboardLayout>());
+  });
+
   testWidgets('shift is one-shot and double tap enables caps lock', (
     tester,
   ) async {
