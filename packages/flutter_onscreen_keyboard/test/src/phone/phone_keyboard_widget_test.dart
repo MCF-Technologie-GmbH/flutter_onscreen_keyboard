@@ -430,6 +430,22 @@ void main() {
     }
   });
 
+  testWidgets('rapid taps cannot mount stale key previews', (tester) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    final preview = find.byWidgetPredicate(
+      (widget) => widget is Material && widget.elevation == 5,
+    );
+
+    for (final letter in ['t', 'u', 'f', 'g', 'h']) {
+      await tester.tap(find.text(letter));
+    }
+    await tester.pump();
+
+    expect(controller.text, 'tufgh');
+    expect(preview, findsNothing);
+  });
+
   testWidgets('swipe wins over tap and inserts the decoded candidate', (
     tester,
   ) async {

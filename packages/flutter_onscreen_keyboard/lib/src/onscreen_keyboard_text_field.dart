@@ -740,16 +740,26 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
   void _onFocusChanged() {
     if (!widget.enableOnscreenKeyboard) return;
     if (_effectiveFocusNode.hasPrimaryFocus) {
-      _keyboard.attachTextField(this);
-      final mode =
-          widget.onscreenKeyboardMode ??
-          _keyboard.layout.modes.entries.first.key;
-
-      _keyboard
-        ..setModeNamed(mode)
-        ..open();
+      _attachAndOpenKeyboard();
     } else {
       _keyboard.close();
+    }
+  }
+
+  void _attachAndOpenKeyboard() {
+    _keyboard.attachTextField(this);
+    final mode =
+        widget.onscreenKeyboardMode ?? _keyboard.layout.modes.entries.first.key;
+    _keyboard
+      ..setModeNamed(mode)
+      ..open();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (widget.enableOnscreenKeyboard &&
+        _effectiveFocusNode.hasPrimaryFocus &&
+        !_keyboard.isVisible) {
+      _attachAndOpenKeyboard();
     }
   }
 
@@ -790,7 +800,7 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
+    final field = TextField(
       controller: _effectiveController,
       focusNode: _effectiveFocusNode,
       decoration: widget.decoration,
@@ -867,5 +877,12 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
       hintLocales: widget.hintLocales,
       selectAllOnFocus: widget.selectAllOnFocus,
     );
+    return widget.enableOnscreenKeyboard
+        ? Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            child: field,
+          )
+        : field;
   }
 }

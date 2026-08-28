@@ -133,6 +133,7 @@ class PlaygroundScreen extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           const OnscreenKeyboardTextField(
+            key: ValueKey('typing-and-return-field'),
             autofocus: true,
             keyboardType: TextInputType.multiline,
             textInputAction: TextInputAction.newline,
@@ -181,12 +182,14 @@ class PlaygroundScreen extends StatelessWidget {
           _SwipeDiagnosticsCard(diagnostic: swipeDiagnostic),
           const SizedBox(height: 20),
           const OnscreenKeyboardTextField(
+            key: ValueKey('email-field'),
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,
             decoration: InputDecoration(labelText: 'Email layout'),
           ),
           const SizedBox(height: 16),
           const OnscreenKeyboardTextField(
+            key: ValueKey('signed-decimal-field'),
             keyboardType: TextInputType.numberWithOptions(
               signed: true,
               decimal: true,
@@ -196,6 +199,7 @@ class PlaygroundScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const OnscreenKeyboardTextField(
+            key: ValueKey('ordinary-field'),
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(labelText: 'Ordinary single-line'),
           ),

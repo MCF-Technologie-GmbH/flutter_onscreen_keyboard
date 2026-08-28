@@ -768,16 +768,26 @@ class _OnscreenKeyboardTextFormFieldState
   void _onFocusChanged() {
     if (!widget.enableOnscreenKeyboard) return;
     if (_effectiveFocusNode.hasPrimaryFocus) {
-      _keyboard.attachTextField(this);
-      final mode =
-          widget.onscreenKeyboardMode ??
-          _keyboard.layout.modes.entries.first.key;
-
-      _keyboard
-        ..setModeNamed(mode)
-        ..open();
+      _attachAndOpenKeyboard();
     } else {
       _keyboard.close();
+    }
+  }
+
+  void _attachAndOpenKeyboard() {
+    _keyboard.attachTextField(this);
+    final mode =
+        widget.onscreenKeyboardMode ?? _keyboard.layout.modes.entries.first.key;
+    _keyboard
+      ..setModeNamed(mode)
+      ..open();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (widget.enableOnscreenKeyboard &&
+        _effectiveFocusNode.hasPrimaryFocus &&
+        !_keyboard.isVisible) {
+      _attachAndOpenKeyboard();
     }
   }
 
@@ -818,7 +828,7 @@ class _OnscreenKeyboardTextFormFieldState
 
   @override
   Widget build(BuildContext context) {
-    return TextFormField(
+    final field = TextFormField(
       key: widget.formFieldKey,
       groupId: widget.groupId,
       controller: _effectiveController,
@@ -901,5 +911,12 @@ class _OnscreenKeyboardTextFormFieldState
       canRequestFocus: widget.canRequestFocus,
       hintLocales: widget.hintLocales,
     );
+    return widget.enableOnscreenKeyboard
+        ? Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            child: field,
+          )
+        : field;
   }
 }

@@ -158,7 +158,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
 
   void _removeAlternatesOverlay() {
     final entry = _alternatesOverlay;
-    if (entry != null && entry.mounted) entry.remove();
+    if (entry != null) entry.remove();
   }
 
   void _showAlternates() {
@@ -267,7 +267,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   void _removeKeyPreview() {
     final entry = _keyPreviewOverlay;
     _keyPreviewOverlay = null;
-    if (entry != null && entry.mounted) entry.remove();
+    if (entry != null) entry.remove();
   }
 
   @override
