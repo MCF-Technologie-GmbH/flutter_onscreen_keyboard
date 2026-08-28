@@ -186,6 +186,51 @@ void main() {
     expect(animation.tween.end, greaterThan(200));
   });
 
+  testWidgets('docked transition retargets cleanly when interrupted', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final childKey = GlobalKey();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.docked,
+          child: SizedBox.expand(
+            key: childKey,
+            child: Scaffold(
+              body: OnscreenKeyboardTextField(controller: controller),
+            ),
+          ),
+        ),
+      ),
+    );
+    final keyboard = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    );
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final openingHeight = tester.getSize(find.byKey(childKey)).height;
+
+    keyboard.hide();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final closingHeight = tester.getSize(find.byKey(childKey)).height;
+    expect(closingHeight, greaterThan(openingHeight));
+
+    keyboard.open();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final reopenedHeight = tester.getSize(find.byKey(childKey)).height;
+    expect(reopenedHeight, lessThan(closingHeight));
+
+    await tester.pumpAndSettle();
+    expect(keyboard.isVisible, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('runtime configuration updates locale and typing mode', (
     tester,
   ) async {
