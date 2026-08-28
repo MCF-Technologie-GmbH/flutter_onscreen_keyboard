@@ -153,8 +153,14 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
       final swipeEdges = <String, List<OnscreenKeyboardLexiconEntry>>{};
       for (final entry in language.value) {
         final normalized = entry.word.toLowerCase();
-        final prefix = normalized.substring(0, math.min(2, normalized.length));
-        prefixes.putIfAbsent(prefix, () => []).add(entry);
+        for (
+          var length = 1;
+          length <= math.min(4, normalized.length);
+          length++
+        ) {
+          final prefix = normalized.substring(0, length);
+          prefixes.putIfAbsent(prefix, () => []).add(entry);
+        }
         final edges =
             '${normalized.characters.first}\u0000'
             '${normalized.characters.last}';
@@ -197,13 +203,17 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
     final candidates = <OnscreenKeyboardSuggestion>[];
     final entries =
         _lexicons[language] ?? const <OnscreenKeyboardLexiconEntry>[];
-    final source = prefix.isEmpty
-        ? entries.take(256)
-        : _prefixIndex[language]?[prefix.substring(
-                0,
-                math.min(2, prefix.length),
-              )] ??
-              const <OnscreenKeyboardLexiconEntry>[];
+    Iterable<OnscreenKeyboardLexiconEntry> source = entries.take(256);
+    if (prefix.isNotEmpty) {
+      source = const <OnscreenKeyboardLexiconEntry>[];
+      for (var length = math.min(4, prefix.length); length >= 1; length--) {
+        final matches = _prefixIndex[language]?[prefix.substring(0, length)];
+        if (matches != null && matches.isNotEmpty) {
+          source = matches;
+          break;
+        }
+      }
+    }
     for (final entry in source) {
       request.cancellationToken.throwIfCancelled();
       final word = entry.word.toLowerCase();
