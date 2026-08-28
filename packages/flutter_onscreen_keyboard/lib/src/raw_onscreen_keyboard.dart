@@ -51,6 +51,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
 
 class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   final List<(GlobalKey, TextKey)> _textKeys = [];
+  final Map<String, GlobalKey> _textKeyKeys = {};
   final List<String> _trace = [];
   final List<Offset> _points = [];
   final GlobalKey _surfaceKey = GlobalKey();
@@ -176,17 +177,20 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
           Column(
             spacing: activeMode.verticalSpacing,
             children: [
-              for (final row in activeMode.rows)
+              for (final (rowIndex, row) in activeMode.rows.indexed)
                 Expanded(
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       ?row.leading,
-                      for (final key in row.keys)
+                      for (final (keyIndex, key) in row.keys.indexed)
                         Expanded(
                           flex: key.flex,
                           child: switch (key) {
-                            TextKey() => _textKey(key),
+                            TextKey() => _textKey(
+                              key,
+                              '${widget.mode}:$rowIndex:$keyIndex',
+                            ),
                             ActionKey() => ActionKeyWidget(
                               actionKey: key,
                               pressed: widget.pressedActionKeys.contains(
@@ -249,8 +253,11 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     super.dispose();
   }
 
-  Widget _textKey(TextKey key) {
-    final globalKey = GlobalKey();
+  Widget _textKey(TextKey key, String position) {
+    // A key must keep the same element while the keyboard repaints its pressed
+    // state or swipe trace. Recreating this GlobalKey canceled long-press
+    // timers and could strand preview overlays after pointer down.
+    final globalKey = _textKeyKeys.putIfAbsent(position, GlobalKey.new);
     _textKeys.add((globalKey, key));
     return KeyedSubtree(
       key: globalKey,

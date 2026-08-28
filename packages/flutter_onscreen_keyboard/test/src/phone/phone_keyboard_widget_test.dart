@@ -256,12 +256,36 @@ void main() {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
     final gesture = await tester.startGesture(tester.getCenter(find.text('a')));
+    // Render the pressed state before the hold threshold, as a real device
+    // does on the frame immediately following pointer down.
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 451));
 
     expect(find.text('á'), findsOneWidget);
     await gesture.up();
     await tester.pump();
     expect(controller.text, 'á');
+  });
+
+  testWidgets('key previews are removed after every completed press', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    final preview = find.byWidgetPredicate(
+      (widget) => widget is Material && widget.elevation == 5,
+    );
+
+    for (final letter in ['t', 'u', 'f', 'g', 'h']) {
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text(letter)),
+      );
+      await tester.pump();
+      expect(preview, findsOneWidget);
+      await gesture.up();
+      await tester.pump();
+      expect(preview, findsNothing);
+    }
   });
 
   testWidgets('swipe wins over tap and inserts the decoded candidate', (

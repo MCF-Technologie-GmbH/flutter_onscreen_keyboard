@@ -118,10 +118,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
 
   void _removeAlternatesOverlay() {
     final entry = _alternatesOverlay;
-    if (entry == null || !entry.mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (entry.mounted) entry.remove();
-    });
+    if (entry != null && entry.mounted) entry.remove();
   }
 
   void _showAlternates() {
@@ -177,6 +174,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   }
 
   void _showKeyPreview() {
+    _removeKeyPreview();
     final box = context.findRenderObject()! as RenderBox;
     final origin = box.localToGlobal(Offset.zero);
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -219,10 +217,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   void _removeKeyPreview() {
     final entry = _keyPreviewOverlay;
     _keyPreviewOverlay = null;
-    if (entry == null || !entry.mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (entry.mounted) entry.remove();
-    });
+    if (entry != null && entry.mounted) entry.remove();
   }
 
   @override
