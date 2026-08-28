@@ -24,6 +24,7 @@ sealed class OnscreenKeyboardKey {
   const factory OnscreenKeyboardKey.text({
     required String primary,
     String? secondary,
+    List<String> alternates,
     Widget? child,
     int flex,
     CallbackWithContext? onTap,
@@ -42,6 +43,7 @@ sealed class OnscreenKeyboardKey {
     String? label,
     Widget? child,
     bool canHold,
+    bool repeatable,
     int flex,
     CallbackWithContext? onTap,
     CallbackWithContext? onTapDown,
@@ -77,6 +79,7 @@ class TextKey extends OnscreenKeyboardKey {
     required this.primary,
     this.secondary,
     this.child,
+    this.alternates = const [],
     super.flex,
     super.onTap,
     super.onTapDown,
@@ -91,6 +94,9 @@ class TextKey extends OnscreenKeyboardKey {
 
   /// A custom widget to display inside the key instead of plain text.
   final Widget? child;
+
+  /// Alternate characters shown after a long press.
+  final List<String> alternates;
 
   /// Returns the key’s text based on the [secondary] state.
   ///
@@ -118,6 +124,7 @@ class ActionKey extends OnscreenKeyboardKey {
     this.label,
     this.child,
     this.canHold = false,
+    this.repeatable = false,
     super.flex,
     super.onTap,
     super.onTapDown,
@@ -135,6 +142,9 @@ class ActionKey extends OnscreenKeyboardKey {
 
   /// Whether the key can be held down for repeated action.
   final bool canHold;
+
+  /// Whether holding this key should repeatedly invoke its action.
+  final bool repeatable;
 
   @override
   String toString() => 'ActionKey($name)';

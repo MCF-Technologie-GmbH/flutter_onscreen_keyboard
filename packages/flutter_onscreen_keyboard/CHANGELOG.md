@@ -1,3 +1,14 @@
+## 0.5.0-mcf.1
+
+- Add an opt-in docked presentation with animated viewport insets and reduced-motion support.
+- Add field-aware English QWERTY and German QWERTZ phone layouts.
+- Add pluggable offline suggestions, conservative autocorrect, swipe decoding, and bounded learning APIs.
+- Add one-shot shift, caps lock, repeat backspace, long-press alternates, language switching, field actions, and correction undo.
+- Add confidence-gated swipe decoding, adaptive touch offsets, trigram context, removable suggestions, and opt-in swipe diagnostics.
+- Add spacebar cursor control, drag-to-delete words, double-space period insertion, punctuation spacing, and swipe undo.
+- Add a deterministic compact binary lexicon codec for off-UI-isolate dictionary loading.
+- Preserve the existing floating presentation and defaults for compatibility.
+
 ## 0.4.7
 
  - **FEAT**: update `OnscreenKeyboardTextField` to match latest `TextField`. ([ef0cca1f](https://github.com/albinpk/flutter_onscreen_keyboard/commit/ef0cca1f0cc23bf8ada1ad1153bdc79a37e95fff))

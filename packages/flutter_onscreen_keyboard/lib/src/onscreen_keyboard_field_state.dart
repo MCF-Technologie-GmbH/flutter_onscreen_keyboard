@@ -17,4 +17,13 @@ abstract interface class OnscreenKeyboardFieldState {
 
   /// The [ValueChanged<String>] callback for text changes.
   ValueChanged<String>? get onChanged;
+
+  /// Phone-keyboard behavior derived from this field's Flutter configuration.
+  OnscreenKeyboardFieldConfiguration get fieldConfiguration;
+
+  /// Callback invoked when a non-newline action submits the field.
+  ValueChanged<String>? get onSubmitted;
+
+  /// Callback invoked before the default completion behavior.
+  VoidCallback? get onEditingComplete;
 }

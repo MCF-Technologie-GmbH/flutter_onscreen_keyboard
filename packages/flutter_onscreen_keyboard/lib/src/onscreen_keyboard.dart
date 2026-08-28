@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle;
 
 import 'package:flutter/cupertino.dart';
@@ -32,10 +34,29 @@ class OnscreenKeyboard extends StatefulWidget {
     this.aspectRatio,
     this.showControlBar = true,
     this.buildControlBarActions,
+    this.presentation = OnscreenKeyboardPresentation.floating,
+    this.typingMode = OnscreenKeyboardTypingMode.off,
+    this.locale,
+    this.languageModel,
+    this.layoutResolver,
+    this.feedback = const OnscreenKeyboardFeedback(),
+    this.editingGestures = const OnscreenKeyboardEditingGestures(),
+    this.suggestionBarBuilder,
+    this.onSwipeDiagnostic,
+    this.minimumSwipeConfidence = .48,
+    this.minimumSwipeScoreMargin = .12,
+    this.dockedHeight,
+    this.enabled = true,
   });
 
   /// The main application child widget.
   final Widget child;
+
+  /// Whether fields and controller calls may show this keyboard.
+  ///
+  /// Disabling an open keyboard closes and detaches it immediately. Defaults
+  /// to true for compatibility with earlier releases.
+  final bool enabled;
 
   /// The layout configuration for the keyboard.
   ///
@@ -66,6 +87,42 @@ class OnscreenKeyboard extends StatefulWidget {
 
   /// {@macro controlBar.actions}
   final ActionsBuilder? buildControlBarActions;
+
+  /// Whether the keyboard floats above or docks below the application.
+  final OnscreenKeyboardPresentation presentation;
+
+  /// Offline language-assistance behavior.
+  final OnscreenKeyboardTypingMode typingMode;
+
+  /// Locale override. When omitted the app locale is followed.
+  final Locale? locale;
+
+  /// Optional offline language model.
+  final OnscreenKeyboardLanguageModel? languageModel;
+
+  /// Optional field- and locale-aware layout resolver.
+  final OnscreenKeyboardLayoutResolver? layoutResolver;
+
+  /// Key interaction feedback.
+  final OnscreenKeyboardFeedback feedback;
+
+  /// Familiar cursor, punctuation, and word-deletion gestures.
+  final OnscreenKeyboardEditingGestures editingGestures;
+
+  /// Optional replacement for the default three-slot suggestion bar.
+  final SuggestionBarBuilder? suggestionBarBuilder;
+
+  /// Optional, explicit local diagnostics callback for swipe tuning.
+  final ValueChanged<OnscreenKeyboardSwipeDiagnostic>? onSwipeDiagnostic;
+
+  /// Minimum decoder confidence required for automatic swipe insertion.
+  final double minimumSwipeConfidence;
+
+  /// Minimum score separation from the runner-up for automatic insertion.
+  final double minimumSwipeScoreMargin;
+
+  /// Optional dock height. Defaults to a responsive viewport fraction.
+  final HeightGetter? dockedHeight;
 
   /// A builder to wrap the app with [OnscreenKeyboard].
   ///
@@ -112,6 +169,21 @@ class OnscreenKeyboard extends StatefulWidget {
     Widget? dragHandle,
     double? aspectRatio,
     ActionsBuilder? buildControlBarActions,
+    OnscreenKeyboardPresentation presentation =
+        OnscreenKeyboardPresentation.floating,
+    OnscreenKeyboardTypingMode typingMode = OnscreenKeyboardTypingMode.off,
+    Locale? locale,
+    OnscreenKeyboardLanguageModel? languageModel,
+    OnscreenKeyboardLayoutResolver? layoutResolver,
+    OnscreenKeyboardFeedback feedback = const OnscreenKeyboardFeedback(),
+    OnscreenKeyboardEditingGestures editingGestures =
+        const OnscreenKeyboardEditingGestures(),
+    SuggestionBarBuilder? suggestionBarBuilder,
+    ValueChanged<OnscreenKeyboardSwipeDiagnostic>? onSwipeDiagnostic,
+    double minimumSwipeConfidence = .48,
+    double minimumSwipeScoreMargin = .12,
+    HeightGetter? dockedHeight,
+    bool enabled = true,
   }) => (context, child) {
     return OnscreenKeyboard(
       theme: theme,
@@ -121,6 +193,19 @@ class OnscreenKeyboard extends StatefulWidget {
       dragHandle: dragHandle,
       aspectRatio: aspectRatio,
       buildControlBarActions: buildControlBarActions,
+      presentation: presentation,
+      typingMode: typingMode,
+      locale: locale,
+      languageModel: languageModel,
+      layoutResolver: layoutResolver,
+      feedback: feedback,
+      editingGestures: editingGestures,
+      suggestionBarBuilder: suggestionBarBuilder,
+      onSwipeDiagnostic: onSwipeDiagnostic,
+      minimumSwipeConfidence: minimumSwipeConfidence,
+      minimumSwipeScoreMargin: minimumSwipeScoreMargin,
+      dockedHeight: dockedHeight,
+      enabled: enabled,
       child: child!,
     );
   };
@@ -150,14 +235,62 @@ No OnscreenKeyboard found in context. Did you wrap your app with OnscreenKeyboar
 class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     implements OnscreenKeyboardController {
   /// Whether to show the secondary keys.
-  bool get _showSecondary =>
-      _pressedActionKeys.contains(ActionKeyType.capslock) ^
-      _pressedActionKeys.contains(ActionKeyType.shift);
+  bool get _showSecondary => _capsLock || _shift;
 
   final _pressedActionKeys = <String>{};
+  bool _shift = false;
+  bool _capsLock = false;
+  DateTime? _lastShiftTap;
+  Locale _locale = const Locale('en');
+  late OnscreenKeyboardTypingMode _typingMode = widget.typingMode;
+  List<OnscreenKeyboardSuggestion> _suggestions = const [];
+  OnscreenKeyboardCancellationToken? _requestToken;
+  TextEditingValue? _correctionBefore;
+  TextEditingValue? _correctionAfter;
+  DateTime? _lastSpaceTap;
+  TextEditingValue? _swipeBefore;
+  TextEditingValue? _swipeAfter;
+  OnscreenKeyboardSwipeData? _lastSwipeGesture;
+  List<OnscreenKeyboardSuggestion> _lastSwipeSuggestions = const [];
 
   @override
-  KeyboardLayout get layout => _layout;
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.locale == null) {
+      final next = Localizations.maybeLocaleOf(context) ?? const Locale('en');
+      if (_locale != next) _locale = next;
+    } else {
+      _locale = widget.locale!;
+    }
+    _ensureValidMode();
+  }
+
+  @override
+  void didUpdateWidget(covariant OnscreenKeyboard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled && !widget.enabled) {
+      close();
+    }
+    if (widget.locale != oldWidget.locale && widget.locale != null) {
+      _locale = widget.locale!;
+    }
+    if (widget.typingMode != oldWidget.typingMode) {
+      _typingMode = widget.typingMode;
+    }
+    if (widget.languageModel != oldWidget.languageModel ||
+        widget.typingMode != oldWidget.typingMode ||
+        widget.locale != oldWidget.locale ||
+        widget.layout != oldWidget.layout ||
+        widget.layoutResolver != oldWidget.layoutResolver) {
+      _requestToken?.cancel();
+      _suggestions = const [];
+      _ensureValidMode();
+      unawaited(_refreshSuggestions());
+    }
+  }
+
+  @override
+  KeyboardLayout get layout => _resolveLayout();
 
   void _onKeyDown(OnscreenKeyboardKey key) {
     switch (key) {
@@ -182,51 +315,176 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   void _handleTexTextKeyDown(TextKey key) {
-    if (activeTextField?.controller case final controller?
-        when controller.selection.isValid) {
-      final keyText = key.getText(secondary: _showSecondary);
-      final currentText = controller.text;
-      final selection = controller.selection;
+    final text = key.getText(secondary: _showSecondary);
+    final corrected = _isWordBoundary(text) && _maybeApplyCachedCorrection();
+    final handled =
+        (text == ' ' && _maybeInsertDoubleSpacePeriod()) ||
+        (_isPunctuation(text) && _replaceSpaceWithPunctuation(text));
+    if (!handled) _insertText(text);
+    if (corrected) _correctionAfter = activeTextField?.controller.value;
+    if (text != ' ') _lastSpaceTap = null;
+    _clearSwipeUndoUnlessCurrent();
+    if (_shift && !_capsLock && text.trim().isNotEmpty) {
+      setState(() {
+        _shift = false;
+        _lastShiftTap = null;
+        _pressedActionKeys.remove(ActionKeyType.shift);
+      });
+    }
+    unawaited(_afterTextInput(text));
+  }
 
-      // Create the new text value by replacing the selected range
-      final newText = currentText.replaceRange(
-        selection.start,
-        selection.end,
-        keyText,
-      );
+  void _insertText(String text, {bool replaceCurrentWord = false}) {
+    final field = activeTextField;
+    final controller = field?.controller;
+    if (field == null || controller == null || !controller.selection.isValid) {
+      return;
+    }
+    var start = controller.selection.start;
+    final end = controller.selection.end;
+    if (replaceCurrentWord && controller.selection.isCollapsed) {
+      start = _currentWordRange(controller.value).start;
+    }
+    _replaceRange(start, end, text);
+  }
 
-      // Calculate the new cursor position
-      final newCursorPosition = selection.start + keyText.length;
+  bool _replaceRange(int start, int end, String text) {
+    final field = activeTextField;
+    final controller = field?.controller;
+    if (field == null || controller == null) return false;
+    final oldValue = controller.value;
+    var newValue = TextEditingValue(
+      text: controller.text.replaceRange(start, end, text),
+      selection: TextSelection.collapsed(offset: start + text.length),
+    );
+    for (final formatter
+        in field.inputFormatters ?? const <TextInputFormatter>[]) {
+      newValue = formatter.formatEditUpdate(oldValue, newValue);
+    }
+    if (newValue == oldValue) return false;
+    controller.value = newValue;
+    if (newValue.text != oldValue.text) field.onChanged?.call(newValue.text);
+    return true;
+  }
 
-      // Create a new TextEditingValue with the proposed changes
-      var newValue = TextEditingValue(
-        text: newText,
-        selection: TextSelection.collapsed(offset: newCursorPosition),
-      );
+  bool _isPunctuation(String text) =>
+      text.length == 1 && RegExp('[.,!?;:]').hasMatch(text);
 
-      // Apply input formatters if they exist
-      if (activeTextField!.inputFormatters != null) {
-        final oldValue = controller.value;
-        for (final formatter in activeTextField!.inputFormatters!) {
-          newValue = formatter.formatEditUpdate(oldValue, newValue);
-        }
-      }
+  bool _replaceSpaceWithPunctuation(String punctuation) {
+    final controller = activeTextField?.controller;
+    if (controller == null ||
+        !controller.selection.isValid ||
+        !controller.selection.isCollapsed ||
+        controller.selection.start < 1 ||
+        controller.text[controller.selection.start - 1] != ' ') {
+      return false;
+    }
+    final offset = controller.selection.start;
+    return _replaceRange(offset - 1, offset, punctuation);
+  }
 
-      // Only update if the formatters didn't reject the change
-      if (newValue.text != controller.text ||
-          newValue.selection != controller.selection) {
-        controller.value = newValue;
+  bool _maybeInsertDoubleSpacePeriod() {
+    if (!widget.editingGestures.doubleSpacePeriod) return false;
+    final now = DateTime.now();
+    final controller = activeTextField?.controller;
+    final offset = controller?.selection.start ?? -1;
+    final isDoubleTap =
+        _lastSpaceTap != null &&
+        now.difference(_lastSpaceTap!) <= const Duration(milliseconds: 350);
+    _lastSpaceTap = now;
+    if (!isDoubleTap ||
+        controller == null ||
+        !controller.selection.isValid ||
+        !controller.selection.isCollapsed ||
+        offset < 2 ||
+        controller.text[offset - 1] != ' ' ||
+        !RegExp(r'[\p{L}\p{N}\p{M}]', unicode: true).hasMatch(
+          controller.text[offset - 2],
+        )) {
+      return false;
+    }
+    _lastSpaceTap = null;
+    return _replaceRange(offset - 1, offset, '. ');
+  }
 
-        // Call the onChanged callback if the text actually changed
-        if (newValue.text != currentText &&
-            activeTextField!.onChanged != null) {
-          activeTextField!.onChanged!(newValue.text);
+  bool _isWordBoundary(String text) => RegExp(r'^\s|[.,!?;:]$').hasMatch(text);
+
+  Future<void> _afterTextInput(String text) async {
+    if (_isWordBoundary(text)) {
+      final words = _wordsBeforeCursor();
+      if (words.isNotEmpty &&
+          activeTextField!.fieldConfiguration.allowsLearning) {
+        final model = widget.languageModel;
+        if (model != null && model is OnscreenKeyboardContextLanguageModel) {
+          await (model as OnscreenKeyboardContextLanguageModel)
+              .learnAcceptedContext(
+                locale: _locale,
+                word: words.last,
+                previousWord: words.length > 1 ? words[words.length - 2] : null,
+                previousPreviousWord: words.length > 2
+                    ? words[words.length - 3]
+                    : null,
+              );
+        } else {
+          await model?.learnAcceptedWord(
+            locale: _locale,
+            word: words.last,
+            previousWord: words.length > 1 ? words[words.length - 2] : null,
+          );
         }
       }
     }
+    await _refreshSuggestions();
   }
 
+  bool _maybeApplyCachedCorrection() {
+    final field = activeTextField;
+    if (_typingMode != OnscreenKeyboardTypingMode.autocorrect ||
+        field == null ||
+        !field.fieldConfiguration.allowsAutocorrect ||
+        _suggestions.isEmpty) {
+      return false;
+    }
+    final range = _currentWordRange(field.controller.value);
+    if (range.isCollapsed) return false;
+    final original = field.controller.text.substring(range.start, range.end);
+    final corrections = _suggestions
+        .where(
+          (suggestion) =>
+              suggestion.kind != OnscreenKeyboardSuggestionKind.typed,
+        )
+        .toList(growable: false);
+    if (corrections.isEmpty) return false;
+    final candidate = corrections.first;
+    final margin = corrections.length < 2
+        ? candidate.score
+        : candidate.score - corrections[1].score;
+    if (candidate.word.toLowerCase() == original.toLowerCase() ||
+        candidate.confidence < .9 ||
+        margin < .35 ||
+        !_safeToCorrect(original)) {
+      return false;
+    }
+    _correctionBefore = field.controller.value;
+    _insertText(candidate.word, replaceCurrentWord: true);
+    _correctionAfter = field.controller.value;
+    return true;
+  }
+
+  bool _safeToCorrect(String word) =>
+      word == word.toLowerCase() &&
+      RegExp(r'^[\p{L}]+$', unicode: true).hasMatch(word) &&
+      !word.contains(RegExp(r'[/@._\d]'));
+
   void _handleActionKeyDown(ActionKey key) {
+    if (key.name == ActionKeyType.language) {
+      switchLocale();
+      return;
+    }
+    if (key.name == ActionKeyType.shift || key.name == ActionKeyType.capslock) {
+      _handleShift(key.name);
+      return;
+    }
     if (!key.canHold) {
       setState(() => _pressedActionKeys.add(key.name));
     }
@@ -237,6 +495,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
       switch (key.name) {
         case ActionKeyType.backspace:
+          if (undoLastCorrection()) return;
+          if (_undoLastSwipe()) return;
           if (controller.text.isEmpty) return;
           String? newText;
           int? offset;
@@ -288,12 +548,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
         case ActionKeyType.enter:
           if (!controller.selection.isValid) return;
-          if (activeTextField!.maxLines == 1) {
-            // if a single line field
-            activeTextField!.focusNode.unfocus();
-            // close();
-          } else {
-            // if a multi line field
+          final action = activeTextField!.fieldConfiguration.inputAction;
+          if (activeTextField!.fieldConfiguration.multiline &&
+              (action == null || action == TextInputAction.newline)) {
             final newText = controller.text.replaceRange(
               controller.start,
               controller.end,
@@ -308,6 +565,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
             if (newText != originalText && activeTextField!.onChanged != null) {
               activeTextField!.onChanged!(newText);
             }
+          } else {
+            activeTextField!.onEditingComplete?.call();
+            activeTextField!.onSubmitted?.call(controller.text);
+            if (action == TextInputAction.next) {
+              activeTextField!.focusNode.nextFocus();
+            } else {
+              activeTextField!.focusNode.unfocus();
+            }
           }
 
         case ActionKeyType.capslock:
@@ -319,6 +584,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   void _handleActionKeyUp(ActionKey key) {
+    if (key.name == ActionKeyType.shift || key.name == ActionKeyType.capslock) {
+      return;
+    }
     _safeSetState(() {
       if (key.canHold && !_pressedActionKeys.contains(key.name)) {
         _pressedActionKeys.add(key.name);
@@ -328,21 +596,243 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     });
   }
 
+  void _handleShift(String name) {
+    final now = DateTime.now();
+    final doubleTap =
+        _lastShiftTap != null &&
+        now.difference(_lastShiftTap!) <= const Duration(milliseconds: 300);
+    setState(() {
+      if (name == ActionKeyType.capslock || doubleTap) {
+        _capsLock = !_capsLock;
+        _shift = false;
+      } else if (_capsLock) {
+        _capsLock = false;
+        _shift = false;
+      } else {
+        _shift = !_shift;
+      }
+      _pressedActionKeys
+        ..remove(ActionKeyType.shift)
+        ..remove(ActionKeyType.capslock);
+      if (_capsLock) {
+        _pressedActionKeys.add(ActionKeyType.capslock);
+      } else if (_shift) {
+        _pressedActionKeys.add(ActionKeyType.shift);
+      }
+    });
+    _lastShiftTap = doubleTap || name == ActionKeyType.capslock ? null : now;
+  }
+
   /// Safely call [setState] after the current frame.
   void _safeSetState(VoidCallback fn) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => setState(fn));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(fn);
+    });
   }
 
   /// Whether the keyboard is currently visible.
   bool _visible = false;
+  Timer? _focusVisibilityTimer;
 
   @override
-  void open() => setState(() => _visible = true);
+  bool get isVisible => widget.enabled && _visible;
+
+  @override
+  void open() {
+    if (!widget.enabled) return;
+    setState(() => _visible = true);
+    _ensureActiveFieldVisible();
+  }
+
+  void _ensureActiveFieldVisible() {
+    if (widget.presentation != OnscreenKeyboardPresentation.docked) return;
+    final field = activeTextField;
+    if (field == null) return;
+    final reducedMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    _focusVisibilityTimer?.cancel();
+    _focusVisibilityTimer = Timer(
+      reducedMotion ? Duration.zero : const Duration(milliseconds: 190),
+      () {
+        _focusVisibilityTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => unawaited(_scrollFieldVisible(field, reducedMotion)),
+        );
+      },
+    );
+  }
+
+  Future<void> _scrollFieldVisible(
+    OnscreenKeyboardFieldState field,
+    bool reducedMotion,
+  ) async {
+    if (!mounted ||
+        field != activeTextField ||
+        !field.focusNode.hasFocus ||
+        field is! State) {
+      return;
+    }
+    final fieldState = field as State;
+    if (!fieldState.mounted) return;
+    final renderObject = fieldState.context.findRenderObject();
+    final scrollable = Scrollable.maybeOf(
+      fieldState.context,
+      axis: Axis.vertical,
+    );
+    if (renderObject == null || scrollable == null) return;
+    await scrollable.position.ensureVisible(
+      renderObject,
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      curve: const Cubic(.23, 1, .32, 1),
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    );
+  }
 
   @override
   void close() {
+    _focusVisibilityTimer?.cancel();
     detachTextField();
     setState(() => _visible = false);
+  }
+
+  @override
+  void hide() {
+    _focusVisibilityTimer?.cancel();
+    setState(() => _visible = false);
+  }
+
+  @override
+  Locale get locale => _locale;
+
+  @override
+  OnscreenKeyboardTypingMode get typingMode => _typingMode;
+
+  @override
+  void setLocale(Locale locale) {
+    if (_locale == locale) return;
+    setState(() {
+      _locale = locale;
+      _ensureValidMode();
+      _suggestions = const [];
+    });
+    unawaited(_refreshSuggestions());
+  }
+
+  @override
+  void switchLocale() => setLocale(
+    _locale.languageCode.toLowerCase() == 'en'
+        ? const Locale('de')
+        : const Locale('en'),
+  );
+
+  @override
+  void setTypingMode(OnscreenKeyboardTypingMode mode) {
+    if (_typingMode == mode) return;
+    setState(() {
+      _typingMode = mode;
+      if (mode == OnscreenKeyboardTypingMode.off) _suggestions = const [];
+    });
+    unawaited(_refreshSuggestions());
+  }
+
+  @override
+  bool undoLastCorrection() {
+    final controller = activeTextField?.controller;
+    if (controller == null ||
+        _correctionBefore == null ||
+        controller.value != _correctionAfter) {
+      return false;
+    }
+    final before = _correctionBefore!;
+    controller.value = before;
+    activeTextField?.onChanged?.call(before.text);
+    _correctionBefore = null;
+    _correctionAfter = null;
+    unawaited(_refreshSuggestions());
+    return true;
+  }
+
+  bool _undoLastSwipe() {
+    final controller = activeTextField?.controller;
+    if (controller == null ||
+        _swipeBefore == null ||
+        controller.value != _swipeAfter) {
+      return false;
+    }
+    final before = _swipeBefore!;
+    controller.value = before;
+    activeTextField?.onChanged?.call(before.text);
+    _clearSwipeUndo();
+    unawaited(_refreshSuggestions());
+    return true;
+  }
+
+  void _clearSwipeUndoUnlessCurrent() {
+    final controller = activeTextField?.controller;
+    if (_swipeAfter != null && controller?.value != _swipeAfter) {
+      _clearSwipeUndo();
+    }
+  }
+
+  void _clearSwipeUndo() {
+    _swipeBefore = null;
+    _swipeAfter = null;
+    _lastSwipeGesture = null;
+    _lastSwipeSuggestions = const [];
+  }
+
+  @override
+  Future<void> forgetSuggestion(
+    OnscreenKeyboardSuggestion suggestion,
+  ) async {
+    final model = widget.languageModel;
+    if (model == null || model is! OnscreenKeyboardPersonalizationModel) {
+      return;
+    }
+    await (model as OnscreenKeyboardPersonalizationModel).forgetWord(
+      locale: _locale,
+      word: suggestion.word,
+    );
+    await _refreshSuggestions();
+  }
+
+  void _moveCursor(int characters) {
+    final controller = activeTextField?.controller;
+    if (controller == null || !controller.selection.isValid) return;
+    final base = controller.selection.extentOffset;
+    final target = (base + characters).clamp(0, controller.text.length);
+    controller.selection = TextSelection.collapsed(offset: target);
+    _correctionBefore = null;
+    _correctionAfter = null;
+    _clearSwipeUndo();
+    unawaited(_refreshSuggestions());
+  }
+
+  void _deletePreviousWord() {
+    final controller = activeTextField?.controller;
+    if (controller == null || !controller.selection.isValid) return;
+    if (!controller.selection.isCollapsed) {
+      _replaceRange(controller.selection.start, controller.selection.end, '');
+      return;
+    }
+    final end = controller.selection.start;
+    if (end == 0) return;
+    var start = end;
+    while (start > 0 && RegExp(r'\s').hasMatch(controller.text[start - 1])) {
+      start--;
+    }
+    final isWord = RegExp(r"[\p{L}\p{M}\p{N}'’-]", unicode: true);
+    while (start > 0 && isWord.hasMatch(controller.text[start - 1])) {
+      start--;
+    }
+    if (start == end) start--;
+    _replaceRange(start, end, '');
+    _correctionBefore = null;
+    _correctionAfter = null;
+    _clearSwipeUndo();
+    unawaited(_refreshSuggestions());
   }
 
   @override
@@ -359,12 +849,17 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   @override
   void attachTextField(OnscreenKeyboardFieldState state) {
     _activeTextField.value = state;
+    _ensureValidMode();
+    if (_visible) _ensureActiveFieldVisible();
+    unawaited(_refreshSuggestions());
   }
 
   @override
   void detachTextField([OnscreenKeyboardFieldState? state]) {
     if (state == null || state == activeTextField) {
       _activeTextField.value = null;
+      _requestToken?.cancel();
+      _suggestions = const [];
     }
   }
 
@@ -386,26 +881,44 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   /// Returns the default keyboard layout based on the current platform.
-  KeyboardLayout _getDefaultLayout() => switch (defaultTargetPlatform) {
-    TargetPlatform.android ||
-    TargetPlatform.iOS ||
-    TargetPlatform.fuchsia => const MobileKeyboardLayout(),
-    TargetPlatform.macOS ||
-    TargetPlatform.windows ||
-    TargetPlatform.linux => const DesktopKeyboardLayout(),
-  };
+  KeyboardLayout _getDefaultLayout() =>
+      widget.presentation == OnscreenKeyboardPresentation.docked
+      ? PhoneKeyboardLayout(
+          locale: _locale,
+          fieldConfiguration: activeTextField?.fieldConfiguration,
+        )
+      : switch (defaultTargetPlatform) {
+          TargetPlatform.android ||
+          TargetPlatform.iOS ||
+          TargetPlatform.fuchsia => const MobileKeyboardLayout(),
+          TargetPlatform.macOS ||
+          TargetPlatform.windows ||
+          TargetPlatform.linux => const DesktopKeyboardLayout(),
+        };
 
   /// The resolved layout used by the keyboard.
-  late final KeyboardLayout _layout = widget.layout ?? _getDefaultLayout();
+  KeyboardLayout _resolveLayout() =>
+      widget.layoutResolver?.call(
+        context,
+        _locale,
+        activeTextField?.fieldConfiguration,
+      ) ??
+      widget.layout ??
+      _getDefaultLayout();
 
   /// The current active keyboard mode (e.g., "alphabetic", "symbols").
   ///
   /// This determines which layout mode from [KeyboardLayout.modes] is used.
-  late String _mode = _layout.modes.keys.first;
+  String _mode = '';
+
+  void _ensureValidMode() {
+    final modes = _resolveLayout().modes;
+    if (!modes.containsKey(_mode)) _mode = modes.keys.first;
+  }
 
   @override
   void switchMode() {
-    final modes = _layout.modes.keys.toList();
+    final modes = layout.modes.keys.toList();
     final i = modes.indexOf(_mode);
     setState(() => _mode = modes[(i + 1) % modes.length]);
   }
@@ -414,7 +927,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   void setModeNamed(String modeName) {
     if (_mode == modeName) return;
 
-    if (_layout.modes.containsKey(modeName)) {
+    if (layout.modes.containsKey(modeName)) {
       setState(() {
         _mode = modeName;
       });
@@ -424,6 +937,349 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         'not found on the KeyboardLayout.',
       );
     }
+  }
+
+  Future<void> _refreshSuggestions() async {
+    final model = widget.languageModel;
+    final field = activeTextField;
+    _requestToken?.cancel();
+    if (model == null ||
+        field == null ||
+        _typingMode == OnscreenKeyboardTypingMode.off ||
+        !field.fieldConfiguration.allowsSuggestions) {
+      if (mounted && _suggestions.isNotEmpty) {
+        setState(() => _suggestions = const []);
+      }
+      return;
+    }
+    final token = OnscreenKeyboardCancellationToken();
+    _requestToken = token;
+    final words = _wordsBeforeCursor(includeCurrent: false);
+    final range = _currentWordRange(field.controller.value);
+    final prefix = field.controller.text.substring(range.start, range.end);
+    try {
+      final result = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: _locale,
+          prefix: prefix,
+          previousWord: words.isEmpty ? null : words.last,
+          previousPreviousWord: words.length < 2
+              ? null
+              : words[words.length - 2],
+          cancellationToken: token,
+        ),
+      );
+      if (!mounted || token.isCancelled || token != _requestToken) return;
+      setState(() => _suggestions = result);
+    } on OnscreenKeyboardRequestCancelled {
+      // A newer edit superseded this request.
+    }
+  }
+
+  Future<void> _previewSwipeData(OnscreenKeyboardSwipeData data) =>
+      _decodeSwipe(
+        data.trace,
+        points: data.points,
+        keyCenters: data.keyCenters,
+        commit: false,
+      );
+
+  bool get _swipeEnabled =>
+      _typingMode != OnscreenKeyboardTypingMode.off &&
+      (activeTextField?.fieldConfiguration.allowsSuggestions ?? false);
+
+  Future<void> _handleSwipeData(OnscreenKeyboardSwipeData data) => _decodeSwipe(
+    data.trace,
+    points: data.points,
+    keyCenters: data.keyCenters,
+    commit: true,
+  );
+
+  Future<void> _decodeSwipe(
+    List<String> trace, {
+    required bool commit,
+    List<Offset> points = const [],
+    Map<String, Offset> keyCenters = const {},
+  }) async {
+    final model = widget.languageModel;
+    final field = activeTextField;
+    if (model == null ||
+        field == null ||
+        _typingMode == OnscreenKeyboardTypingMode.off ||
+        !field.fieldConfiguration.allowsSuggestions) {
+      return;
+    }
+    _requestToken?.cancel();
+    final token = OnscreenKeyboardCancellationToken();
+    _requestToken = token;
+    final words = _wordsBeforeCursor(includeCurrent: false);
+    try {
+      final result = await model.decodeSwipe(
+        OnscreenKeyboardSwipeRequest(
+          locale: _locale,
+          trace: trace,
+          previousWord: words.isEmpty ? null : words.last,
+          previousPreviousWord: words.length < 2
+              ? null
+              : words[words.length - 2],
+          cancellationToken: token,
+          points: points,
+          keyCenters: keyCenters,
+          onDiagnostic: commit ? widget.onSwipeDiagnostic : null,
+        ),
+      );
+      if (!mounted || token.isCancelled || token != _requestToken) return;
+      if (result.isNotEmpty) {
+        _lastSwipeGesture = OnscreenKeyboardSwipeData(
+          trace: List.unmodifiable(trace),
+          points: List.unmodifiable(points),
+          keyCenters: Map.unmodifiable(keyCenters),
+        );
+        _lastSwipeSuggestions = result;
+        if (commit) {
+          final margin = result.length < 2
+              ? result.first.score
+              : result.first.score - result[1].score;
+          if (result.first.confidence >= widget.minimumSwipeConfidence &&
+              margin >= widget.minimumSwipeScoreMargin) {
+            _swipeBefore = field.controller.value;
+            _insertText('${result.first.word} ', replaceCurrentWord: true);
+            _swipeAfter = field.controller.value;
+          }
+        }
+        setState(() => _suggestions = result);
+      }
+    } on OnscreenKeyboardRequestCancelled {
+      // A newer gesture superseded this request.
+    }
+  }
+
+  void _acceptSuggestion(OnscreenKeyboardSuggestion suggestion) {
+    final previousWords = _wordsBeforeCursor(includeCurrent: false);
+    final previous = previousWords.isEmpty ? null : previousWords.last;
+    final previousPrevious = previousWords.length < 2
+        ? null
+        : previousWords[previousWords.length - 2];
+    final isSwipeAlternative = _lastSwipeSuggestions.contains(suggestion);
+    if (isSwipeAlternative &&
+        _swipeBefore != null &&
+        activeTextField?.controller.value == _swipeAfter) {
+      activeTextField!.controller.value = _swipeBefore!;
+    }
+    _insertText('${suggestion.word} ', replaceCurrentWord: true);
+    if (isSwipeAlternative &&
+        _lastSwipeGesture != null &&
+        widget.languageModel is OnscreenKeyboardPersonalizationModel) {
+      unawaited(
+        (widget.languageModel! as OnscreenKeyboardPersonalizationModel)
+            .learnSwipeGesture(
+              locale: _locale,
+              word: suggestion.word,
+              gesture: _lastSwipeGesture!,
+            ),
+      );
+    }
+    _clearSwipeUndo();
+    if (activeTextField?.fieldConfiguration.allowsLearning ?? false) {
+      final model = widget.languageModel;
+      if (model != null && model is OnscreenKeyboardContextLanguageModel) {
+        unawaited(
+          (model as OnscreenKeyboardContextLanguageModel).learnAcceptedContext(
+            locale: _locale,
+            word: suggestion.word,
+            previousWord: previous,
+            previousPreviousWord: previousPrevious,
+          ),
+        );
+      } else {
+        unawaited(
+          model?.learnAcceptedWord(
+                locale: _locale,
+                word: suggestion.word,
+                previousWord: previous,
+              ) ??
+              Future<void>.value(),
+        );
+      }
+    }
+    unawaited(_refreshSuggestions());
+  }
+
+  TextRange _currentWordRange(TextEditingValue value) {
+    if (!value.selection.isValid ||
+        value.selection.start < 0 ||
+        value.selection.end < 0) {
+      return TextRange.collapsed(value.text.length);
+    }
+    var start = value.selection.start;
+    var end = value.selection.end;
+    final isWord = RegExp(r"[\p{L}\p{M}'’-]", unicode: true);
+    while (start > 0 && isWord.hasMatch(value.text[start - 1])) {
+      start--;
+    }
+    while (end < value.text.length && isWord.hasMatch(value.text[end])) {
+      end++;
+    }
+    return TextRange(start: start, end: end);
+  }
+
+  List<String> _wordsBeforeCursor({bool includeCurrent = true}) {
+    final controller = activeTextField?.controller;
+    if (controller == null) return const [];
+    if (!controller.selection.isValid || controller.selection.start < 0) {
+      return RegExp(r"[\p{L}\p{M}'’-]+", unicode: true)
+          .allMatches(controller.text)
+          .map((match) => match.group(0)!)
+          .toList(growable: false);
+    }
+    var end = controller.selection.start;
+    if (!includeCurrent) end = _currentWordRange(controller.value).start;
+    return RegExp(r"[\p{L}\p{M}'’-]+", unicode: true)
+        .allMatches(controller.text.substring(0, end))
+        .map((match) => match.group(0)!)
+        .toList(growable: false);
+  }
+
+  Widget _buildSuggestionBar(BuildContext context) {
+    final undo = _correctionBefore == null ? null : undoLastCorrection;
+    if (widget.suggestionBarBuilder case final builder?) {
+      return builder(context, _suggestions, _acceptSuggestion, undo);
+    }
+    return SizedBox(
+      height: 44,
+      child: Row(
+        children: [
+          if (undo != null)
+            IconButton(
+              onPressed: undo,
+              icon: const Icon(Icons.undo_rounded),
+              tooltip: 'Undo correction',
+            ),
+          for (final suggestion in _suggestions.take(3))
+            Expanded(
+              child: TextButton(
+                onPressed: () => _acceptSuggestion(suggestion),
+                onLongPress: () => forgetSuggestion(suggestion),
+                child: Text(
+                  suggestion.word,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
+                ),
+              ),
+            ),
+          if (_suggestions.isEmpty) const Spacer(),
+          IconButton(
+            onPressed: switchLocale,
+            icon: const Icon(Icons.language_rounded),
+            tooltip: _locale.languageCode.toUpperCase(),
+          ),
+          IconButton(
+            onPressed: hide,
+            icon: const Icon(Icons.keyboard_hide_rounded),
+            tooltip: 'Hide keyboard',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDocked(BuildContext context, KeyboardLayout resolvedLayout) {
+    final media = MediaQuery.of(context);
+    final reducedMotion = media.disableAnimations;
+    final keyboardVisible = widget.enabled && _visible;
+    final maximumHeight = math.min(media.size.height * .55, 440).toDouble();
+    final minimumHeight = maximumHeight < 270 ? maximumHeight : 270.0;
+    final calculatedHeight =
+        (media.size.width / resolvedLayout.aspectRatio +
+                (widget.showControlBar ? 44 : 0))
+            .clamp(minimumHeight, maximumHeight);
+    final targetHeight = widget.dockedHeight?.call(context) ?? calculatedHeight;
+    return TweenAnimationBuilder<double>(
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      curve: const Cubic(.23, 1, .32, 1),
+      tween: Tween(end: keyboardVisible ? targetHeight : 0),
+      builder: (context, inset, _) => Stack(
+        fit: StackFit.expand,
+        children: [
+          MediaQuery(
+            data: media,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: inset),
+              child: widget.child,
+            ),
+          ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: ClipRect(
+              child: SizedBox(
+                width: double.infinity,
+                height: inset,
+                child: OverflowBox(
+                  alignment: Alignment.topCenter,
+                  minHeight: targetHeight,
+                  maxHeight: targetHeight,
+                  child: _buildDockedPanel(context, resolvedLayout),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDockedPanel(
+    BuildContext context,
+    KeyboardLayout resolvedLayout,
+  ) {
+    final theme = context.theme;
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: TextFieldTapRegion(
+        child: ColoredBox(
+          color: theme.color ?? Theme.of(context).colorScheme.surfaceContainer,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: theme.padding ?? EdgeInsets.zero,
+              child: Column(
+                children: [
+                  if (widget.showControlBar) _buildSuggestionBar(context),
+                  Expanded(
+                    child: RawOnscreenKeyboard(
+                      aspectRatio: widget.aspectRatio,
+                      fillAvailableSpace: true,
+                      onKeyDown: _onKeyDown,
+                      onKeyUp: _onKeyUp,
+                      onAlternate: _insertText,
+                      onSpaceCursorMove:
+                          widget.editingGestures.spaceCursorControl
+                          ? _moveCursor
+                          : null,
+                      onDeleteWord: widget.editingGestures.wordDelete
+                          ? _deletePreviousWord
+                          : null,
+                      onSwipeData: _swipeEnabled ? _handleSwipeData : null,
+                      onSwipeDataUpdate: _swipeEnabled
+                          ? _previewSwipeData
+                          : null,
+                      feedback: widget.feedback,
+                      layout: resolvedLayout,
+                      mode: _mode,
+                      pressedActionKeys: _pressedActionKeys,
+                      showSecondary: _showSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   final GlobalKey _keyboardKey = GlobalKey();
@@ -436,6 +1292,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   @override
   void dispose() {
+    _requestToken?.cancel();
+    _focusVisibilityTimer?.cancel();
+    _activeTextField.dispose();
     _alignListener.dispose();
     _draggingListener.dispose();
     super.dispose();
@@ -443,192 +1302,252 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   @override
   Widget build(BuildContext context) {
+    final resolvedLayout = _resolveLayout();
+    final resolvedTheme =
+        widget.theme ??
+        (widget.presentation == OnscreenKeyboardPresentation.docked
+            ? OnscreenKeyboardThemeData.phone(context)
+            : const OnscreenKeyboardThemeData());
+    if (!resolvedLayout.modes.containsKey(_mode)) {
+      _mode = resolvedLayout.modes.keys.first;
+    }
     assert(
-      _layout.modes.isNotEmpty,
+      resolvedLayout.modes.isNotEmpty,
       'Keyboard layout must have at least one mode defined.',
     );
 
     return _OnscreenKeyboardProvider(
       state: this,
-      child: Overlay(
-        initialEntries: [
-          OverlayEntry(
-            builder: (context) => OnscreenKeyboardTheme(
-              data: widget.theme ?? const OnscreenKeyboardThemeData(),
-              child: Stack(
-                children: [
-                  // the app widget
-                  widget.child,
-
-                  // keyboard
-                  if (_visible)
-                    Positioned.fill(
-                      child: Builder(
-                        builder: (context) {
-                          final useSaveArea = context.theme.useSafeArea ?? true;
-                          return SafeArea(
-                            top: useSaveArea,
-                            right: useSaveArea,
-                            bottom: useSaveArea,
-                            left: useSaveArea,
-                            child: Builder(
-                              builder: (context) {
-                                // drag handle keyboard widget
-                                final dragHandle = GestureDetector(
-                                  onPanStart: (_) =>
-                                      _draggingListener.value = true,
-                                  onPanCancel: () =>
-                                      _draggingListener.value = false,
-                                  onPanDown: (_) =>
-                                      _draggingListener.value = true,
-                                  onPanEnd: (_) =>
-                                      _draggingListener.value = false,
-                                  onPanUpdate: (details) {
-                                    final keyboardSize =
-                                        _keyboardKey.currentContext!.size!;
-                                    _alignListener.value = (
-                                      (_alignListener.value.$1 +
-                                              details.delta.dx /
-                                                  (context.size!.width -
-                                                      keyboardSize.width))
-                                          .clamp(0.0, 1.0),
-                                      (_alignListener.value.$2 +
-                                              details.delta.dy /
-                                                  (context.size!.height -
-                                                      keyboardSize.height))
-                                          .clamp(0.0, 1.0),
-                                    );
-                                  },
-                                  child: ValueListenableBuilder(
-                                    valueListenable: _draggingListener,
-                                    builder: (context, value, child) {
-                                      // user defined drag handle
-                                      if (child != null) return child;
-                                      return IconButton(
-                                        mouseCursor: value
-                                            ? SystemMouseCursors.grabbing
-                                            : SystemMouseCursors.grab,
-                                        onPressed: null,
-                                        icon: Icon(
-                                          Icons.drag_handle_rounded,
-                                          color: Theme.of(
-                                            context,
-                                          ).iconTheme.color,
-                                        ),
-                                      );
-                                    },
-                                    child: widget.dragHandle,
-                                  ),
-                                );
-
-                                // keyboard widget
-                                final keyboard = TextFieldTapRegion(
-                                  // theme override for modes
-                                  child: OnscreenKeyboardTheme(
-                                    data:
-                                        _layout.modes[_mode]!.theme?.call(
-                                          context,
-                                        ) ??
-                                        context.theme,
-                                    child: Builder(
-                                      key: _keyboardKey,
-                                      builder: (context) {
-                                        final colors = Theme.of(
-                                          context,
-                                        ).colorScheme;
-                                        final theme = context.theme;
-                                        final borderRadius =
-                                            theme.borderRadius ??
-                                            BorderRadius.circular(6);
-                                        return Material(
-                                          type: MaterialType.transparency,
-                                          child: Container(
-                                            width: widget.width?.call(context),
-                                            margin: theme.margin,
-                                            padding: theme.padding,
-                                            clipBehavior: Clip.hardEdge,
-                                            decoration: BoxDecoration(
-                                              color: theme.color,
-                                              borderRadius: borderRadius,
-                                              gradient: theme.gradient,
-                                              boxShadow:
-                                                  theme.boxShadow ??
-                                                  [
-                                                    BoxShadow(
-                                                      color: colors.shadow.fade(
-                                                        0.05,
-                                                      ),
-                                                      spreadRadius: 5,
-                                                      blurRadius: 5,
-                                                    ),
-                                                  ],
-                                            ),
-                                            foregroundDecoration: BoxDecoration(
-                                              borderRadius: borderRadius,
-                                              border:
-                                                  theme.border ??
-                                                  Border.all(
-                                                    color: colors.outline
-                                                        .fade(),
-                                                  ),
-                                            ),
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                if (widget.showControlBar)
-                                                  _ControlBar(
-                                                    dragHandle: dragHandle,
-                                                    actions: widget
-                                                        .buildControlBarActions
-                                                        ?.call(context),
-                                                  ),
-                                                RawOnscreenKeyboard(
-                                                  aspectRatio:
-                                                      widget.aspectRatio,
-                                                  onKeyDown: _onKeyDown,
-                                                  onKeyUp: _onKeyUp,
-                                                  layout: _layout,
-                                                  mode: _mode,
-                                                  pressedActionKeys:
-                                                      _pressedActionKeys,
-                                                  showSecondary: _showSecondary,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                );
-
-                                return AnimatedBuilder(
-                                  animation: _alignListener,
-                                  builder: (context, child) {
-                                    return Align(
-                                      alignment: Alignment(
-                                        _alignListener.value.$1 * 2 - 1,
-                                        _alignListener.value.$2 * 2 - 1,
-                                      ),
-                                      child: child,
-                                    );
-                                  },
-                                  child: keyboard,
-                                );
-                              },
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
+      child: OnscreenKeyboardTheme(
+        data: resolvedTheme,
+        child: widget.presentation == OnscreenKeyboardPresentation.docked
+            ? _RetargetableOverlay(
+                child: _buildDocked(context, resolvedLayout),
+              )
+            : _buildFloating(context, resolvedLayout),
       ),
     );
   }
+
+  Widget _buildFloating(BuildContext context, KeyboardLayout resolvedLayout) {
+    return Overlay(
+      initialEntries: [
+        OverlayEntry(
+          builder: (context) => OnscreenKeyboardTheme(
+            data: widget.theme ?? const OnscreenKeyboardThemeData(),
+            child: Stack(
+              children: [
+                // the app widget
+                widget.child,
+
+                // keyboard
+                if (widget.enabled && _visible)
+                  Positioned.fill(
+                    child: Builder(
+                      builder: (context) {
+                        final useSaveArea = context.theme.useSafeArea ?? true;
+                        return SafeArea(
+                          top: useSaveArea,
+                          right: useSaveArea,
+                          bottom: useSaveArea,
+                          left: useSaveArea,
+                          child: Builder(
+                            builder: (context) {
+                              // drag handle keyboard widget
+                              final dragHandle = GestureDetector(
+                                onPanStart: (_) =>
+                                    _draggingListener.value = true,
+                                onPanCancel: () =>
+                                    _draggingListener.value = false,
+                                onPanDown: (_) =>
+                                    _draggingListener.value = true,
+                                onPanEnd: (_) =>
+                                    _draggingListener.value = false,
+                                onPanUpdate: (details) {
+                                  final keyboardSize =
+                                      _keyboardKey.currentContext!.size!;
+                                  _alignListener.value = (
+                                    (_alignListener.value.$1 +
+                                            details.delta.dx /
+                                                (context.size!.width -
+                                                    keyboardSize.width))
+                                        .clamp(0.0, 1.0),
+                                    (_alignListener.value.$2 +
+                                            details.delta.dy /
+                                                (context.size!.height -
+                                                    keyboardSize.height))
+                                        .clamp(0.0, 1.0),
+                                  );
+                                },
+                                child: ValueListenableBuilder(
+                                  valueListenable: _draggingListener,
+                                  builder: (context, value, child) {
+                                    if (child != null) return child;
+                                    return IconButton(
+                                      mouseCursor: value
+                                          ? SystemMouseCursors.grabbing
+                                          : SystemMouseCursors.grab,
+                                      onPressed: null,
+                                      icon: Icon(
+                                        Icons.drag_handle_rounded,
+                                        color: Theme.of(
+                                          context,
+                                        ).iconTheme.color,
+                                      ),
+                                    );
+                                  },
+                                  child: widget.dragHandle,
+                                ),
+                              );
+
+                              final keyboard = TextFieldTapRegion(
+                                child: OnscreenKeyboardTheme(
+                                  data:
+                                      resolvedLayout.modes[_mode]!.theme?.call(
+                                        context,
+                                      ) ??
+                                      context.theme,
+                                  child: Builder(
+                                    key: _keyboardKey,
+                                    builder: (context) {
+                                      final colors = Theme.of(
+                                        context,
+                                      ).colorScheme;
+                                      final theme = context.theme;
+                                      final borderRadius =
+                                          theme.borderRadius ??
+                                          BorderRadius.circular(6);
+                                      return Material(
+                                        type: MaterialType.transparency,
+                                        child: Container(
+                                          width: widget.width?.call(context),
+                                          margin: theme.margin,
+                                          padding: theme.padding,
+                                          clipBehavior: Clip.hardEdge,
+                                          decoration: BoxDecoration(
+                                            color: theme.color,
+                                            borderRadius: borderRadius,
+                                            gradient: theme.gradient,
+                                            boxShadow:
+                                                theme.boxShadow ??
+                                                [
+                                                  BoxShadow(
+                                                    color: colors.shadow.fade(
+                                                      .05,
+                                                    ),
+                                                    spreadRadius: 5,
+                                                    blurRadius: 5,
+                                                  ),
+                                                ],
+                                          ),
+                                          foregroundDecoration: BoxDecoration(
+                                            borderRadius: borderRadius,
+                                            border:
+                                                theme.border ??
+                                                Border.all(
+                                                  color: colors.outline.fade(),
+                                                ),
+                                          ),
+                                          child: Column(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              if (widget.showControlBar)
+                                                _ControlBar(
+                                                  dragHandle: dragHandle,
+                                                  actions: widget
+                                                      .buildControlBarActions
+                                                      ?.call(context),
+                                                ),
+                                              RawOnscreenKeyboard(
+                                                aspectRatio: widget.aspectRatio,
+                                                onKeyDown: _onKeyDown,
+                                                onKeyUp: _onKeyUp,
+                                                onAlternate: _insertText,
+                                                onSpaceCursorMove:
+                                                    widget
+                                                        .editingGestures
+                                                        .spaceCursorControl
+                                                    ? _moveCursor
+                                                    : null,
+                                                onDeleteWord:
+                                                    widget
+                                                        .editingGestures
+                                                        .wordDelete
+                                                    ? _deletePreviousWord
+                                                    : null,
+                                                onSwipeData: _swipeEnabled
+                                                    ? _handleSwipeData
+                                                    : null,
+                                                onSwipeDataUpdate: _swipeEnabled
+                                                    ? _previewSwipeData
+                                                    : null,
+                                                feedback: widget.feedback,
+                                                layout: resolvedLayout,
+                                                mode: _mode,
+                                                pressedActionKeys:
+                                                    _pressedActionKeys,
+                                                showSecondary: _showSecondary,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              );
+
+                              return AnimatedBuilder(
+                                animation: _alignListener,
+                                builder: (context, child) => Align(
+                                  alignment: Alignment(
+                                    _alignListener.value.$1 * 2 - 1,
+                                    _alignListener.value.$2 * 2 - 1,
+                                  ),
+                                  child: child,
+                                ),
+                                child: keyboard,
+                              );
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Keeps the compatibility overlay supplied by floating presentation while
+/// allowing the docked subtree to retarget whenever runtime configuration,
+/// focus, visibility, or its animated inset changes.
+class _RetargetableOverlay extends StatefulWidget {
+  const _RetargetableOverlay({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_RetargetableOverlay> createState() => _RetargetableOverlayState();
+}
+
+class _RetargetableOverlayState extends State<_RetargetableOverlay> {
+  late final OverlayEntry _entry = OverlayEntry(
+    builder: (context) => widget.child,
+  );
+
+  @override
+  void didUpdateWidget(covariant _RetargetableOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _entry.markNeedsBuild();
+  }
+
+  @override
+  Widget build(BuildContext context) => Overlay(initialEntries: [_entry]);
 }
 
 /// Default control bar widget used in the on-screen keyboard.

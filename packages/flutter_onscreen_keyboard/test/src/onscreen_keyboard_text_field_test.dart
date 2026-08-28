@@ -32,6 +32,28 @@ void main() {
       expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
     });
 
+    testWidgets('retapping a focused field reopens a hidden keyboard', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: OnscreenKeyboard.builder(width: (_) => 200),
+          home: const Scaffold(body: OnscreenKeyboardTextField()),
+        ),
+      );
+      final field = find.byType(OnscreenKeyboardTextField);
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      final keyboard = OnscreenKeyboard.of(tester.element(field))..hide();
+      await tester.pumpAndSettle();
+      expect(keyboard.isVisible, isFalse);
+
+      await tester.tap(field);
+      await tester.pumpAndSettle();
+      expect(keyboard.isVisible, isTrue);
+      expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
+    });
+
     testWidgets(
       'by default keyboardType should be "TextInputType.none"',
       (tester) async {

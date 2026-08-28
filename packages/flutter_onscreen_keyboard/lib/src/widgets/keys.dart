@@ -1,89 +1,329 @@
+// ignore_for_file: public_member_api_docs
+
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
+import 'package:flutter_onscreen_keyboard/src/constants/action_key_type.dart';
 import 'package:flutter_onscreen_keyboard/src/utils/extensions.dart';
 
-/// A widget that visually represents a [TextKey] on the onscreen keyboard.
-///
-/// This widget handles the visual rendering, tap interactions,
-/// and optionally displays a secondary symbol.
-///
-/// The [onTapDown] and [onTapUp] callbacks are triggered when
-/// the key is pressed and released.
-class TextKeyWidget extends StatelessWidget {
-  /// Constructs a [TextKeyWidget] with the given parameters.
+class TextKeyWidget extends StatefulWidget {
   const TextKeyWidget({
     required this.textKey,
     required this.onTapDown,
     required this.onTapUp,
+    required this.suppressTap,
+    required this.feedback,
+    this.onAlternate,
+    this.onCursorMove,
     this.showSecondary = false,
     super.key,
   });
 
-  /// The [TextKey] to be rendered.
   final TextKey textKey;
-
-  /// Callback when the key is pressed.
   final VoidCallback onTapDown;
-
-  /// Callback when the key is released or cancelled.
   final VoidCallback onTapUp;
-
-  /// If true, shows the secondary text from the key (like shifted version).
+  final bool Function() suppressTap;
+  final ValueChanged<String>? onAlternate;
+  final ValueChanged<int>? onCursorMove;
   final bool showSecondary;
+  final OnscreenKeyboardFeedback feedback;
+
+  @override
+  State<TextKeyWidget> createState() => _TextKeyWidgetState();
+}
+
+class _TextKeyWidgetState extends State<TextKeyWidget> {
+  Timer? _longPressTimer;
+  Timer? _spaceTrackTimer;
+  OverlayEntry? _alternatesOverlay;
+  OverlayEntry? _keyPreviewOverlay;
+  int? _pointer;
+  int _alternateIndex = 0;
+  bool _pressed = false;
+  Rect? _popoverRect;
+  Offset? _downPosition;
+  Offset? _lastSpacePosition;
+  double _spaceRemainder = 0;
+  bool _spaceTracking = false;
+
+  void _down(PointerDownEvent event) {
+    if (_pointer != null) return;
+    _pointer = event.pointer;
+    _downPosition = event.position;
+    setState(() => _pressed = true);
+    if (widget.feedback.enableVisualFeedback &&
+        widget.textKey.child == null &&
+        widget.textKey.primary.length <= 2) {
+      _showKeyPreview();
+    }
+    if (widget.feedback.enableHaptics) {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    if (widget.textKey.alternates.isNotEmpty) {
+      _longPressTimer = Timer(const Duration(milliseconds: 450), () {
+        if (!mounted || _pointer == null) return;
+        if (widget.feedback.enableHaptics) {
+          unawaited(HapticFeedback.mediumImpact());
+        }
+        _showAlternates();
+      });
+    }
+    if (widget.textKey.primary == ' ' && widget.onCursorMove != null) {
+      _spaceTrackTimer = Timer(const Duration(milliseconds: 280), () {
+        if (!mounted || _pointer == null) return;
+        _spaceTracking = true;
+        _lastSpacePosition = _downPosition;
+        _removeKeyPreview();
+        if (widget.feedback.enableHaptics) {
+          unawaited(HapticFeedback.mediumImpact());
+        }
+      });
+    }
+  }
+
+  void _move(PointerMoveEvent event) {
+    if (_spaceTracking) {
+      final last = _lastSpacePosition ?? event.position;
+      _spaceRemainder += event.position.dx - last.dx;
+      _lastSpacePosition = event.position;
+      final steps = _spaceRemainder ~/ 14;
+      if (steps != 0) {
+        _spaceRemainder -= steps * 14;
+        widget.onCursorMove?.call(steps);
+      }
+      return;
+    }
+    if (_downPosition case final origin?
+        when (event.position - origin).distance >= 10) {
+      _removeKeyPreview();
+    }
+    final rect = _popoverRect;
+    if (_alternatesOverlay == null || rect == null) return;
+    final index =
+        ((event.position.dx - rect.left) /
+                (rect.width / widget.textKey.alternates.length))
+            .floor()
+            .clamp(0, widget.textKey.alternates.length - 1);
+    if (index != _alternateIndex) {
+      _alternateIndex = index;
+      _alternatesOverlay?.markNeedsBuild();
+    }
+  }
+
+  void _up(PointerUpEvent event) {
+    if (_pointer != event.pointer) return;
+    _longPressTimer?.cancel();
+    _spaceTrackTimer?.cancel();
+    if (_spaceTracking) {
+      _finish();
+      return;
+    }
+    if (_alternatesOverlay != null) {
+      final value = widget.textKey.alternates[_alternateIndex];
+      final alternate = widget.showSecondary ? value.toUpperCase() : value;
+      widget.onAlternate?.call(alternate);
+      _finish();
+      return;
+    } else if (!widget.suppressTap()) {
+      widget.onTapDown();
+      widget.onTapUp();
+      widget.textKey.onTap?.call(context);
+    }
+    _finish();
+  }
+
+  void _cancel(PointerCancelEvent event) {
+    if (_pointer == event.pointer) _finish();
+  }
+
+  void _finish() {
+    _longPressTimer?.cancel();
+    _longPressTimer = null;
+    _spaceTrackTimer?.cancel();
+    _spaceTrackTimer = null;
+    _removeAlternatesOverlay();
+    _alternatesOverlay = null;
+    _removeKeyPreview();
+    _popoverRect = null;
+    _pointer = null;
+    _downPosition = null;
+    _lastSpacePosition = null;
+    _spaceRemainder = 0;
+    _spaceTracking = false;
+    if (mounted) setState(() => _pressed = false);
+  }
+
+  void _removeAlternatesOverlay() {
+    final entry = _alternatesOverlay;
+    if (entry != null) entry.remove();
+  }
+
+  void _showAlternates() {
+    _removeKeyPreview();
+    final box = context.findRenderObject()! as RenderBox;
+    final origin = box.localToGlobal(Offset.zero);
+    const itemWidth = 44.0;
+    const height = 52.0;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final width = math.min(
+      itemWidth * widget.textKey.alternates.length,
+      screenWidth - 8,
+    );
+    final left = (origin.dx + (box.size.width - width) / 2).clamp(
+      4.0,
+      math.max<double>(4, screenWidth - width - 4),
+    );
+    final top = math.max<double>(4, origin.dy - height - 8);
+    _popoverRect = Rect.fromLTWH(left, top, width, height);
+    _alternatesOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        left: left,
+        top: top,
+        width: width,
+        height: height,
+        child: Material(
+          elevation: 6,
+          borderRadius: BorderRadius.circular(10),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
+            children: [
+              for (var i = 0; i < widget.textKey.alternates.length; i++)
+                Expanded(
+                  child: ColoredBox(
+                    color: i == _alternateIndex
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHigh,
+                    child: Center(
+                      child: Text(
+                        widget.showSecondary
+                            ? widget.textKey.alternates[i].toUpperCase()
+                            : widget.textKey.alternates[i],
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_alternatesOverlay!);
+  }
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    _spaceTrackTimer?.cancel();
+    _removeAlternatesOverlay();
+    _removeKeyPreview();
+    super.dispose();
+  }
+
+  void _showKeyPreview() {
+    _removeKeyPreview();
+    final box = context.findRenderObject()! as RenderBox;
+    final origin = box.localToGlobal(Offset.zero);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final width = box.size.width.clamp(52.0, 72.0);
+    const height = 58.0;
+    final left = (origin.dx + (box.size.width - width) / 2).clamp(
+      4.0,
+      screenWidth - width - 4,
+    );
+    final top = math.max<double>(4, origin.dy - height - 5);
+    _keyPreviewOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        left: left,
+        top: top,
+        width: width,
+        height: height,
+        child: IgnorePointer(
+          child: Material(
+            elevation: 5,
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                widget.textKey.getText(secondary: widget.showSecondary),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_keyPreviewOverlay!);
+  }
+
+  void _removeKeyPreview() {
+    final entry = _keyPreviewOverlay;
+    _keyPreviewOverlay = null;
+    if (entry != null) entry.remove();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final theme = context.theme.textKeyThemeData;
-
-    Widget child = switch (textKey.child) {
+    Widget child = switch (widget.textKey.child) {
       Icon() => Padding(
         padding:
             theme.padding ??
             (theme.fitChild ? const EdgeInsets.all(28) : EdgeInsets.zero),
-        child: textKey.child,
+        child: widget.textKey.child,
       ),
       Widget() => Padding(
         padding: theme.padding ?? const EdgeInsets.all(10),
-        child: textKey.child,
+        child: widget.textKey.child,
       ),
       null => Padding(
         padding: theme.padding ?? const EdgeInsets.all(10),
         child: Text(
-          textKey.getText(secondary: showSecondary),
+          widget.textKey.getText(secondary: widget.showSecondary),
           style: theme.textStyle ?? TextStyle(color: theme.foregroundColor),
         ),
       ),
     };
-
-    if (theme.fitChild) {
-      child = FittedBox(child: child);
-    }
-
-    return Container(
-      margin: theme.margin,
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(
-        borderRadius: theme.borderRadius,
-        border: theme.border,
-        boxShadow: theme.boxShadow,
-        gradient: theme.gradient,
-        color: theme.backgroundColor ?? colors.surface,
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        borderRadius: theme.borderRadius,
-        clipBehavior: Clip.hardEdge,
-        child: InkWell(
-          onTapDown: (_) => onTapDown(),
-          onTapUp: (_) => onTapUp(),
-          onTapCancel: onTapUp,
-          child: IconTheme(
-            data: IconThemeData(
-              size: theme.iconSize,
-              color: theme.foregroundColor ?? colors.onSurface,
+    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
+    return Semantics(
+      button: true,
+      label: widget.textKey.getText(secondary: widget.showSecondary),
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: _cancel,
+        child: Transform.scale(
+          scale: widget.feedback.enableVisualFeedback && _pressed ? .96 : 1,
+          child: Container(
+            margin: theme.margin,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              borderRadius: theme.borderRadius,
+              border: theme.border,
+              boxShadow: theme.boxShadow,
+              gradient: theme.gradient,
+              color: widget.feedback.enableVisualFeedback && _pressed
+                  ? colors.primaryContainer
+                  : theme.backgroundColor ?? colors.surface,
             ),
-            child: child,
+            child: IconTheme(
+              data: IconThemeData(
+                size: theme.iconSize,
+                color: theme.foregroundColor ?? colors.onSurface,
+              ),
+              child: child,
+            ),
           ),
         ),
       ),
@@ -91,95 +331,186 @@ class TextKeyWidget extends StatelessWidget {
   }
 }
 
-/// A widget that visually represents an [ActionKey] on the onscreen keyboard.
-///
-/// This widget changes its appearance when pressed and handles
-/// press/release interactions using the given callbacks.
-class ActionKeyWidget extends StatelessWidget {
-  /// Constructs an [ActionKeyWidget] with the given parameters.
+class ActionKeyWidget extends StatefulWidget {
   const ActionKeyWidget({
     required this.actionKey,
     required this.pressed,
     required this.onTapDown,
     required this.onTapUp,
+    required this.feedback,
+    this.capsLock = false,
+    this.onDeleteWord,
     super.key,
   });
 
-  /// The [ActionKey] to be rendered.
   final ActionKey actionKey;
-
-  /// Whether the key is currently in a pressed state.
   final bool pressed;
-
-  /// Callback when the key is pressed.
   final VoidCallback onTapDown;
-
-  /// Callback when the key is released or cancelled.
   final VoidCallback onTapUp;
+  final OnscreenKeyboardFeedback feedback;
+  final bool capsLock;
+  final VoidCallback? onDeleteWord;
+
+  @override
+  State<ActionKeyWidget> createState() => _ActionKeyWidgetState();
+}
+
+class _ActionKeyWidgetState extends State<ActionKeyWidget> {
+  Timer? _repeatTimer;
+  int? _pointer;
+  int _repeatCount = 0;
+  Offset? _downPosition;
+  int _wordDeleteCount = 0;
+
+  void _down(PointerDownEvent event) {
+    if (_pointer != null) return;
+    _pointer = event.pointer;
+    _downPosition = event.position;
+    setState(() {});
+    widget.actionKey.onTapDown?.call(context);
+    widget.onTapDown();
+    if (widget.feedback.enableHaptics) {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    if (widget.actionKey.repeatable) {
+      _repeatTimer = Timer(const Duration(milliseconds: 400), _repeat);
+    }
+  }
+
+  void _move(PointerMoveEvent event) {
+    if (_pointer != event.pointer ||
+        widget.actionKey.name != ActionKeyType.backspace ||
+        widget.onDeleteWord == null ||
+        _downPosition == null) {
+      return;
+    }
+    final distance = _downPosition!.dx - event.position.dx;
+    final count = distance < 28 ? 0 : 1 + ((distance - 28) ~/ 38);
+    while (_wordDeleteCount < count) {
+      _repeatTimer?.cancel();
+      _repeatTimer = null;
+      _wordDeleteCount++;
+      widget.onDeleteWord?.call();
+      if (widget.feedback.enableHaptics) {
+        unawaited(HapticFeedback.selectionClick());
+      }
+    }
+  }
+
+  void _repeat() {
+    if (_pointer == null) return;
+    _repeatCount++;
+    widget.onTapDown();
+    widget.onTapUp();
+    final delay = _repeatCount > 16
+        ? 35
+        : _repeatCount > 7
+        ? 55
+        : 90;
+    _repeatTimer = Timer(Duration(milliseconds: delay), _repeat);
+  }
+
+  void _up(PointerUpEvent event) {
+    if (_pointer != event.pointer) return;
+    widget.actionKey.onTapUp?.call(context);
+    widget.onTapUp();
+    widget.actionKey.onTap?.call(context);
+    _finish();
+  }
+
+  void _cancel(PointerCancelEvent event) {
+    if (_pointer != event.pointer) return;
+    widget.onTapUp();
+    _finish();
+  }
+
+  void _finish() {
+    _repeatTimer?.cancel();
+    _repeatTimer = null;
+    _repeatCount = 0;
+    _wordDeleteCount = 0;
+    _downPosition = null;
+    _pointer = null;
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _repeatTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final theme = context.theme.actionKeyThemeData;
-
-    Widget child = switch (actionKey.child) {
+    final isShift = widget.actionKey.name == ActionKeyType.shift;
+    final visualChild = isShift && widget.capsLock
+        ? const Icon(Icons.keyboard_capslock_rounded)
+        : widget.actionKey.child;
+    final semanticLabel = isShift
+        ? widget.capsLock
+              ? 'Caps Lock on'
+              : widget.pressed
+              ? 'Shift on'
+              : 'Shift off'
+        : widget.actionKey.label ?? widget.actionKey.name;
+    Widget child = switch (visualChild) {
       Icon() => Padding(
         padding:
             theme.padding ??
             (theme.fitChild ? const EdgeInsets.all(28) : EdgeInsets.zero),
-        child: actionKey.child,
+        child: visualChild,
       ),
       Widget() => Padding(
         padding: theme.padding ?? EdgeInsets.zero,
-        child: actionKey.child,
+        child: visualChild,
       ),
       null => Padding(
         padding: theme.padding ?? EdgeInsets.zero,
-        child: Text(actionKey.label ?? actionKey.name),
+        child: Text(
+          widget.actionKey.label ?? widget.actionKey.name,
+          style: theme.textStyle,
+        ),
       ),
     };
-
-    if (theme.fitChild) {
-      child = FittedBox(child: child);
-    }
-
-    return Container(
-      margin: theme.margin,
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(
-        borderRadius: theme.borderRadius,
-        border: theme.border,
-        boxShadow: theme.boxShadow,
-        gradient: theme.gradient,
-        color: pressed
-            ? theme.pressedBackgroundColor ?? colors.primary
-            : theme.backgroundColor ?? colors.surfaceContainer,
-      ),
-      child: Material(
-        type: MaterialType.transparency,
-        borderRadius: theme.borderRadius,
-        clipBehavior: Clip.hardEdge,
-        child: InkWell(
-          onTap: actionKey.onTap != null
-              ? () => actionKey.onTap!(context)
-              : null,
-          onTapDown: (_) {
-            actionKey.onTapDown?.call(context);
-            onTapDown();
-          },
-          onTapUp: (_) {
-            actionKey.onTapUp?.call(context);
-            onTapUp();
-          },
-          onTapCancel: onTapUp,
-          child: IconTheme(
-            data: IconThemeData(
-              size: theme.iconSize,
-              color: pressed
-                  ? theme.pressedForegroundColor ?? colors.onPrimary
-                  : theme.foregroundColor ?? colors.onSurface,
+    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
+    final visuallyPressed =
+        widget.pressed ||
+        (widget.feedback.enableVisualFeedback && _pointer != null);
+    return Semantics(
+      button: true,
+      toggled: isShift ? widget.pressed : null,
+      label: semanticLabel,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: _cancel,
+        child: Transform.scale(
+          scale: visuallyPressed ? .96 : 1,
+          child: Container(
+            margin: theme.margin,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              borderRadius: theme.borderRadius,
+              border: theme.border,
+              boxShadow: theme.boxShadow,
+              gradient: theme.gradient,
+              color: visuallyPressed
+                  ? theme.pressedBackgroundColor ?? colors.primary
+                  : theme.backgroundColor ?? colors.surfaceContainer,
             ),
-            child: child,
+            child: IconTheme(
+              data: IconThemeData(
+                size: theme.iconSize,
+                color: visuallyPressed
+                    ? theme.pressedForegroundColor ?? colors.onPrimary
+                    : theme.foregroundColor ?? colors.onSurface,
+              ),
+              child: child,
+            ),
           ),
         ),
       ),

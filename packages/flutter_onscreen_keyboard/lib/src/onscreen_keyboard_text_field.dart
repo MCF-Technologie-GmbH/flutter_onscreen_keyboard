@@ -34,6 +34,7 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     super.key,
     this.enableOnscreenKeyboard = true,
     this.onscreenKeyboardMode,
+    this.onscreenKeyboardLearningEnabled = true,
     this.groupId = EditableText,
     this.controller,
     this.focusNode,
@@ -133,6 +134,9 @@ class OnscreenKeyboardTextField extends StatefulWidget {
   /// If none is specified the keyboard will use the first mode
   /// specified on the layout mode list.
   final String? onscreenKeyboardMode;
+
+  /// Whether accepted words from this field may be learned locally.
+  final bool onscreenKeyboardLearningEnabled;
 
   /// The configuration for the magnifier of this text field.
   ///
@@ -679,7 +683,7 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     BuildContext context,
     EditableTextState editableTextState,
   ) {
-    if (SystemContextMenu.isSupportedByField(editableTextState)) {
+    if (SystemContextMenu.isSupported(context)) {
       return SystemContextMenu.editableText(
         editableTextState: editableTextState,
       );
@@ -736,16 +740,26 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
   void _onFocusChanged() {
     if (!widget.enableOnscreenKeyboard) return;
     if (_effectiveFocusNode.hasPrimaryFocus) {
-      final mode =
-          widget.onscreenKeyboardMode ??
-          _keyboard.layout.modes.entries.first.key;
-
-      _keyboard
-        ..attachTextField(this)
-        ..setModeNamed(mode)
-        ..open();
+      _attachAndOpenKeyboard();
     } else {
       _keyboard.close();
+    }
+  }
+
+  void _attachAndOpenKeyboard() {
+    _keyboard.attachTextField(this);
+    final mode =
+        widget.onscreenKeyboardMode ?? _keyboard.layout.modes.entries.first.key;
+    _keyboard
+      ..setModeNamed(mode)
+      ..open();
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    if (widget.enableOnscreenKeyboard &&
+        _effectiveFocusNode.hasPrimaryFocus &&
+        !_keyboard.isVisible) {
+      _attachAndOpenKeyboard();
     }
   }
 
@@ -765,8 +779,28 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
   ValueChanged<String>? get onChanged => widget.onChanged;
 
   @override
+  OnscreenKeyboardFieldConfiguration get fieldConfiguration =>
+      OnscreenKeyboardFieldConfiguration.fromFlutter(
+        keyboardType: widget.keyboardType,
+        inputAction: widget.textInputAction,
+        maxLines: widget.maxLines,
+        obscureText: widget.obscureText,
+        readOnly: widget.readOnly,
+        enableSuggestions: widget.enableSuggestions,
+        autocorrect: widget.autocorrect ?? true,
+        learningEnabled: widget.onscreenKeyboardLearningEnabled,
+        inputFormatters: widget.inputFormatters,
+      );
+
+  @override
+  ValueChanged<String>? get onSubmitted => widget.onSubmitted;
+
+  @override
+  VoidCallback? get onEditingComplete => widget.onEditingComplete;
+
+  @override
   Widget build(BuildContext context) {
-    return TextField(
+    final field = TextField(
       controller: _effectiveController,
       focusNode: _effectiveFocusNode,
       decoration: widget.decoration,
@@ -842,7 +876,13 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
       toolbarOptions: widget.toolbarOptions,
       hintLocales: widget.hintLocales,
       selectAllOnFocus: widget.selectAllOnFocus,
-      enableInlinePrediction: widget.enableInlinePrediction,
     );
+    return widget.enableOnscreenKeyboard
+        ? Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            child: field,
+          )
+        : field;
   }
 }

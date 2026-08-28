@@ -3,13 +3,13 @@ description: >
   A customizable and extensible virtual keyboard widget
   for Flutter desktop and touchscreen apps.
 
-version: 0.4.7
+version: 0.5.0-mcf.1
 
 resolution: workspace
 
-homepage: https://github.com/albinpk/flutter_onscreen_keyboard
-repository: https://github.com/albinpk/flutter_onscreen_keyboard
-issue_tracker: https://github.com/albinpk/flutter_onscreen_keyboard/issues
+homepage: https://github.com/MCF-Technologie-GmbH/flutter_onscreen_keyboard
+repository: https://github.com/MCF-Technologie-GmbH/flutter_onscreen_keyboard
+issue_tracker: https://github.com/MCF-Technologie-GmbH/flutter_onscreen_keyboard/issues
 
 environment:
   sdk: ^3.8.1
