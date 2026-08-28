@@ -3,6 +3,23 @@ import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('docked presentation retains the app-level overlay', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.docked,
+          child: Tooltip(message: 'Global action', child: child),
+        ),
+        home: const Scaffold(body: Text('App')),
+      ),
+    );
+
+    expect(find.byTooltip('Global action'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('docked keyboard propagates an animated bottom inset', (
     tester,
   ) async {

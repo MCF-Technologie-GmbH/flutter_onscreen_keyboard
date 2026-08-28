@@ -957,7 +957,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       child: OnscreenKeyboardTheme(
         data: widget.theme ?? const OnscreenKeyboardThemeData(),
         child: widget.presentation == OnscreenKeyboardPresentation.docked
-            ? _buildDocked(context, resolvedLayout)
+            ? _RetargetableOverlay(
+                child: _buildDocked(context, resolvedLayout),
+              )
             : _buildFloating(context, resolvedLayout),
       ),
     );
@@ -1138,6 +1140,33 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       ],
     );
   }
+}
+
+/// Keeps the compatibility overlay supplied by floating presentation while
+/// allowing the docked subtree to retarget whenever runtime configuration,
+/// focus, visibility, or its animated inset changes.
+class _RetargetableOverlay extends StatefulWidget {
+  const _RetargetableOverlay({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_RetargetableOverlay> createState() => _RetargetableOverlayState();
+}
+
+class _RetargetableOverlayState extends State<_RetargetableOverlay> {
+  late final OverlayEntry _entry = OverlayEntry(
+    builder: (context) => widget.child,
+  );
+
+  @override
+  void didUpdateWidget(covariant _RetargetableOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _entry.markNeedsBuild();
+  }
+
+  @override
+  Widget build(BuildContext context) => Overlay(initialEntries: [_entry]);
 }
 
 /// Default control bar widget used in the on-screen keyboard.
