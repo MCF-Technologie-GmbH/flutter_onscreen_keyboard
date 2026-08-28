@@ -765,7 +765,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   TextRange _currentWordRange(TextEditingValue value) {
-    if (!value.selection.isValid) return TextRange.empty;
+    if (!value.selection.isValid ||
+        value.selection.start < 0 ||
+        value.selection.end < 0) {
+      return TextRange.collapsed(value.text.length);
+    }
     var start = value.selection.start;
     var end = value.selection.end;
     final isWord = RegExp(r"[\p{L}\p{M}'’-]", unicode: true);
@@ -780,7 +784,13 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   List<String> _wordsBeforeCursor({bool includeCurrent = true}) {
     final controller = activeTextField?.controller;
-    if (controller == null || !controller.selection.isValid) return const [];
+    if (controller == null) return const [];
+    if (!controller.selection.isValid || controller.selection.start < 0) {
+      return RegExp(r"[\p{L}\p{M}'’-]+", unicode: true)
+          .allMatches(controller.text)
+          .map((match) => match.group(0)!)
+          .toList(growable: false);
+    }
     var end = controller.selection.start;
     if (!includeCurrent) end = _currentWordRange(controller.value).start;
     return RegExp(r"[\p{L}\p{M}'’-]+", unicode: true)

@@ -43,6 +43,38 @@ void main() {
     expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
   });
 
+  testWidgets('programmatic focus tolerates an unset selection', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final focusNode = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.docked,
+          languageModel: const _StaticLanguageModel(),
+          typingMode: OnscreenKeyboardTypingMode.suggestions,
+          child: Scaffold(
+            body: OnscreenKeyboardTextField(
+              controller: controller,
+              focusNode: focusNode,
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(controller.selection.start, -1);
+    focusNode.requestFocus();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('hello'), findsOneWidget);
+  });
+
   testWidgets('shift is one-shot and double tap enables caps lock', (
     tester,
   ) async {
