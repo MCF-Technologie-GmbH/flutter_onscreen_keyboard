@@ -104,7 +104,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
             child: Icon(Icons.space_bar_rounded),
             flex: 72,
           ),
-          OnscreenKeyboardKey.text(primary: '.', flex: 20),
+          OnscreenKeyboardKey.text(primary: '.'),
         ],
         OnscreenKeyboardInputKind.url => const [
           OnscreenKeyboardKey.text(primary: '/', flex: 22),
