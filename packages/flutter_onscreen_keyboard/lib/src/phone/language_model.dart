@@ -203,7 +203,7 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
     final candidates = <OnscreenKeyboardSuggestion>[];
     final entries =
         _lexicons[language] ?? const <OnscreenKeyboardLexiconEntry>[];
-    Iterable<OnscreenKeyboardLexiconEntry> source = entries.take(256);
+    var source = entries.take(256);
     if (prefix.isNotEmpty) {
       source = const <OnscreenKeyboardLexiconEntry>[];
       for (var length = math.min(4, prefix.length); length >= 1; length--) {
