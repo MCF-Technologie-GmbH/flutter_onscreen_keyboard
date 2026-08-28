@@ -39,6 +39,9 @@ abstract interface class OnscreenKeyboardController {
   /// Restores the text immediately preceding the latest automatic correction.
   bool undoLastCorrection();
 
+  /// Removes a prediction from device-local learning and future candidates.
+  Future<void> forgetSuggestion(OnscreenKeyboardSuggestion suggestion);
+
   /// Sets the alignment of the onscreen keyboard.
   ///
   /// [alignment] defines where the keyboard should appear in the app.

@@ -288,12 +288,12 @@ void main() {
     expect(controller.text, afterRelease);
   });
 
-  testWidgets('long press inserts an alternate without inserting base key', (
+  testWidgets('long press defaults to the base key and supports sliding', (
     tester,
   ) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
-    final gesture = await tester.startGesture(tester.getCenter(find.text('a')));
+    var gesture = await tester.startGesture(tester.getCenter(find.text('a')));
     // Render the pressed state before the hold threshold, as a real device
     // does on the frame immediately following pointer down.
     await tester.pump();
@@ -302,7 +302,19 @@ void main() {
     expect(find.text('á'), findsOneWidget);
     await gesture.up();
     await tester.pump();
-    expect(controller.text, 'á');
+    expect(controller.text, 'a');
+
+    final keyboardA = find.descendant(
+      of: find.byType(RawOnscreenKeyboard),
+      matching: find.text('a'),
+    );
+    gesture = await tester.startGesture(tester.getCenter(keyboardA));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 451));
+    await gesture.moveTo(tester.getCenter(find.text('á')));
+    await gesture.up();
+    await tester.pump();
+    expect(controller.text, 'aá');
   });
 
   testWidgets('key previews are removed after every completed press', (
@@ -349,7 +361,7 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    expect(controller.text, 'hello');
+    expect(controller.text, 'hello ');
     expect(languageModel.lastTrace, ['h', 'e', 'l', 'o']);
     expect(languageModel.lastPoints, isNotEmpty);
     expect(languageModel.lastKeyCenters, contains('h'));
@@ -406,6 +418,102 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.backspace_outlined));
     expect(controller.text, 'helo');
+  });
+
+  testWidgets('holding space moves the cursor without inserting a space', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'hello')
+      ..selection = const TextSelection.collapsed(offset: 5);
+    await _pumpKeyboard(tester, controller: controller);
+    final center = tester.getCenter(find.byIcon(Icons.space_bar_rounded));
+    final gesture = await tester.startGesture(center);
+    await tester.pump(const Duration(milliseconds: 281));
+    await gesture.moveTo(center.translate(-30, 0));
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.text, 'hello');
+    expect(controller.selection.baseOffset, 3);
+  });
+
+  testWidgets(
+    'double space inserts a period and punctuation consumes spacing',
+    (
+      tester,
+    ) async {
+      final controller = TextEditingController(text: 'hello')
+        ..selection = const TextSelection.collapsed(offset: 5);
+      await _pumpKeyboard(tester, controller: controller);
+      await tester.tap(find.byIcon(Icons.space_bar_rounded));
+      await tester.tap(find.byIcon(Icons.space_bar_rounded));
+      expect(controller.text, 'hello. ');
+
+      controller.value = const TextEditingValue(
+        text: 'hello ',
+        selection: TextSelection.collapsed(offset: 6),
+      );
+      await tester.tap(find.text(','));
+      expect(controller.text, 'hello,');
+    },
+  );
+
+  testWidgets('dragging backspace left deletes the previous word', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'hello world')
+      ..selection = const TextSelection.collapsed(offset: 11);
+    await _pumpKeyboard(tester, controller: controller);
+    final center = tester.getCenter(find.byIcon(Icons.backspace_outlined));
+    final gesture = await tester.startGesture(center);
+    await tester.pump();
+    await gesture.moveTo(center.translate(-32, 0));
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.text, 'hello ');
+  });
+
+  testWidgets('backspace immediately restores the last swiped text', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: const _StaticLanguageModel(),
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+    );
+    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
+    await gesture.moveTo(tester.getCenter(find.text('e')));
+    await gesture.moveTo(tester.getCenter(find.text('l')));
+    await gesture.moveTo(tester.getCenter(find.text('o')));
+    await gesture.up();
+    await tester.pump();
+    expect(controller.text, 'hello ');
+
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    expect(controller.text, isEmpty);
+  });
+
+  testWidgets('a low confidence swipe stays as suggestions', (tester) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: const _LowConfidenceLanguageModel(),
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+    );
+    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
+    await gesture.moveTo(tester.getCenter(find.text('e')));
+    await gesture.moveTo(tester.getCenter(find.text('l')));
+    await gesture.moveTo(tester.getCenter(find.text('o')));
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.text, isEmpty);
+    expect(find.text('hello'), findsOneWidget);
+    expect(find.text('help'), findsOneWidget);
   });
 }
 
@@ -485,4 +593,16 @@ class _TrackingLanguageModel extends _StaticLanguageModel {
     lastKeyCenters = request.keyCenters;
     return super.decodeSwipe(request);
   }
+}
+
+class _LowConfidenceLanguageModel extends _StaticLanguageModel {
+  const _LowConfidenceLanguageModel();
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> decodeSwipe(
+    OnscreenKeyboardSwipeRequest request,
+  ) async => const [
+    OnscreenKeyboardSuggestion(word: 'hello', score: 4, confidence: .4),
+    OnscreenKeyboardSuggestion(word: 'help', score: 3.95, confidence: .38),
+  ];
 }

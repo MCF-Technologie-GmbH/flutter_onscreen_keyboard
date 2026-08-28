@@ -23,6 +23,8 @@ class RawOnscreenKeyboard extends StatefulWidget {
     this.onSwipeUpdate,
     this.onSwipeData,
     this.onSwipeDataUpdate,
+    this.onSpaceCursorMove,
+    this.onDeleteWord,
     this.feedback = const OnscreenKeyboardFeedback(),
   });
 
@@ -44,6 +46,8 @@ class RawOnscreenKeyboard extends StatefulWidget {
   final ValueChanged<List<String>>? onSwipeUpdate;
   final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeData;
   final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeDataUpdate;
+  final ValueChanged<int>? onSpaceCursorMove;
+  final VoidCallback? onDeleteWord;
   final OnscreenKeyboardFeedback feedback;
 
   @override
@@ -67,7 +71,10 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   void _pointerDown(PointerDownEvent event) {
     if (_pointer != null || !_hasSwipeHandler) return;
     final key = _hit(event.position);
-    if (key == null) return;
+    if (key == null ||
+        !RegExp(r'^\p{L}$', unicode: true).hasMatch(key.primary)) {
+      return;
+    }
     _pointer = event.pointer;
     _origin = event.position;
     _swiping = false;
@@ -205,6 +212,9 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
                                   widget.pressedActionKeys.contains(
                                     ActionKeyType.capslock,
                                   ),
+                              onDeleteWord: key.name == ActionKeyType.backspace
+                                  ? widget.onDeleteWord
+                                  : null,
                               feedback: widget.feedback,
                               onTapDown: () => widget.onKeyDown(key),
                               onTapUp: () => widget.onKeyUp(key),
@@ -276,6 +286,7 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
         feedback: widget.feedback,
         suppressTap: () => _swiping,
         onAlternate: widget.onAlternate,
+        onCursorMove: key.primary == ' ' ? widget.onSpaceCursorMove : null,
         onTapDown: () => widget.onKeyDown(key),
         onTapUp: () => widget.onKeyUp(key),
       ),

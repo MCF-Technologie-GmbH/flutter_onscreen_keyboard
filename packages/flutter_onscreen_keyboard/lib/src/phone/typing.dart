@@ -10,6 +10,20 @@ enum OnscreenKeyboardPresentation { floating, docked }
 /// Controls offline language assistance.
 enum OnscreenKeyboardTypingMode { off, suggestions, autocorrect }
 
+/// Familiar, entirely local phone-keyboard editing gestures.
+@immutable
+class OnscreenKeyboardEditingGestures {
+  const OnscreenKeyboardEditingGestures({
+    this.spaceCursorControl = true,
+    this.doubleSpacePeriod = true,
+    this.wordDelete = true,
+  });
+
+  final bool spaceCursorControl;
+  final bool doubleSpacePeriod;
+  final bool wordDelete;
+}
+
 /// Coarse input categories used by phone layouts and prediction safeguards.
 enum OnscreenKeyboardInputKind {
   text,

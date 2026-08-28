@@ -91,6 +91,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
           ..._contextKeys,
           OnscreenKeyboardKey.action(
             name: ActionKeyType.enter,
+            label: _enterLabel(fieldConfiguration?.inputAction),
             child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
             flex: 34,
           ),
@@ -157,6 +158,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
         const OnscreenKeyboardKey.text(primary: '.', flex: 18),
         OnscreenKeyboardKey.action(
           name: ActionKeyType.enter,
+          label: _enterLabel(fieldConfiguration?.inputAction),
           child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
           flex: 34,
         ),
@@ -180,6 +182,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
         ),
         OnscreenKeyboardKey.action(
           name: ActionKeyType.enter,
+          label: _enterLabel(fieldConfiguration?.inputAction),
           child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
         ),
       ],
@@ -214,19 +217,26 @@ class PhoneKeyboardLayout extends KeyboardLayout {
   OnscreenKeyboardKey _plain(String key) =>
       OnscreenKeyboardKey.text(primary: key);
 
-  OnscreenKeyboardKey _letter(String key) => OnscreenKeyboardKey.text(
-    primary: key,
-    alternates: _alternates[key] ?? const [],
-  );
+  OnscreenKeyboardKey _letter(String key) {
+    final alternates = _alternates[key];
+    return OnscreenKeyboardKey.text(
+      primary: key,
+      alternates: alternates == null ? const [] : [key, ...alternates],
+    );
+  }
 
   Map<String, List<String>> get _alternates => {
     'a': const ['á', 'à', 'â', 'ä', 'ã', 'å', 'æ'],
     'c': const ['ç', 'č'],
+    'd': const ['ď', 'ð'],
     'e': const ['é', 'è', 'ê', 'ë'],
+    'g': const ['ğ'],
     'i': const ['í', 'ì', 'î', 'ï'],
+    'l': const ['ł'],
     'n': const ['ñ'],
     'o': const ['ó', 'ò', 'ô', 'ö', 'õ', 'ø', 'œ'],
     's': const ['ß', 'š'],
+    't': const ['ť', 'ţ', 'þ'],
     'u': const ['ú', 'ù', 'û', 'ü'],
     'y': const ['ý', 'ÿ'],
     'z': const ['ž'],
@@ -239,5 +249,14 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     TextInputAction.send => Icons.send_rounded,
     TextInputAction.newline => Icons.keyboard_return_rounded,
     _ => Icons.done_rounded,
+  };
+
+  static String _enterLabel(TextInputAction? action) => switch (action) {
+    TextInputAction.next => 'Next',
+    TextInputAction.go => 'Go',
+    TextInputAction.search => 'Search',
+    TextInputAction.send => 'Send',
+    TextInputAction.newline => 'Return',
+    _ => 'Done',
   };
 }

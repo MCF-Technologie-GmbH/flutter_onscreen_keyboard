@@ -17,6 +17,7 @@ class TextKeyWidget extends StatefulWidget {
     required this.suppressTap,
     required this.feedback,
     this.onAlternate,
+    this.onCursorMove,
     this.showSecondary = false,
     super.key,
   });
@@ -26,6 +27,7 @@ class TextKeyWidget extends StatefulWidget {
   final VoidCallback onTapUp;
   final bool Function() suppressTap;
   final ValueChanged<String>? onAlternate;
+  final ValueChanged<int>? onCursorMove;
   final bool showSecondary;
   final OnscreenKeyboardFeedback feedback;
 
@@ -35,6 +37,7 @@ class TextKeyWidget extends StatefulWidget {
 
 class _TextKeyWidgetState extends State<TextKeyWidget> {
   Timer? _longPressTimer;
+  Timer? _spaceTrackTimer;
   OverlayEntry? _alternatesOverlay;
   OverlayEntry? _keyPreviewOverlay;
   int? _pointer;
@@ -42,6 +45,9 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   bool _pressed = false;
   Rect? _popoverRect;
   Offset? _downPosition;
+  Offset? _lastSpacePosition;
+  double _spaceRemainder = 0;
+  bool _spaceTracking = false;
 
   void _down(PointerDownEvent event) {
     if (_pointer != null) return;
@@ -65,9 +71,31 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         _showAlternates();
       });
     }
+    if (widget.textKey.primary == ' ' && widget.onCursorMove != null) {
+      _spaceTrackTimer = Timer(const Duration(milliseconds: 280), () {
+        if (!mounted || _pointer == null) return;
+        _spaceTracking = true;
+        _lastSpacePosition = _downPosition;
+        _removeKeyPreview();
+        if (widget.feedback.enableHaptics) {
+          unawaited(HapticFeedback.mediumImpact());
+        }
+      });
+    }
   }
 
   void _move(PointerMoveEvent event) {
+    if (_spaceTracking) {
+      final last = _lastSpacePosition ?? event.position;
+      _spaceRemainder += event.position.dx - last.dx;
+      _lastSpacePosition = event.position;
+      final steps = _spaceRemainder ~/ 14;
+      if (steps != 0) {
+        _spaceRemainder -= steps * 14;
+        widget.onCursorMove?.call(steps);
+      }
+      return;
+    }
     if (_downPosition case final origin?
         when (event.position - origin).distance >= 10) {
       _removeKeyPreview();
@@ -88,8 +116,14 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   void _up(PointerUpEvent event) {
     if (_pointer != event.pointer) return;
     _longPressTimer?.cancel();
+    _spaceTrackTimer?.cancel();
+    if (_spaceTracking) {
+      _finish();
+      return;
+    }
     if (_alternatesOverlay != null) {
-      final alternate = widget.textKey.alternates[_alternateIndex];
+      final value = widget.textKey.alternates[_alternateIndex];
+      final alternate = widget.showSecondary ? value.toUpperCase() : value;
       widget.onAlternate?.call(alternate);
       _finish();
       return;
@@ -108,12 +142,17 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   void _finish() {
     _longPressTimer?.cancel();
     _longPressTimer = null;
+    _spaceTrackTimer?.cancel();
+    _spaceTrackTimer = null;
     _removeAlternatesOverlay();
     _alternatesOverlay = null;
     _removeKeyPreview();
     _popoverRect = null;
     _pointer = null;
     _downPosition = null;
+    _lastSpacePosition = null;
+    _spaceRemainder = 0;
+    _spaceTracking = false;
     if (mounted) setState(() => _pressed = false);
   }
 
@@ -128,9 +167,16 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     final origin = box.localToGlobal(Offset.zero);
     const itemWidth = 44.0;
     const height = 52.0;
-    final width = itemWidth * widget.textKey.alternates.length;
-    final left = origin.dx + (box.size.width - width) / 2;
-    final top = origin.dy - height - 8;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final width = math.min(
+      itemWidth * widget.textKey.alternates.length,
+      screenWidth - 8,
+    );
+    final left = (origin.dx + (box.size.width - width) / 2).clamp(
+      4.0,
+      math.max<double>(4, screenWidth - width - 4),
+    );
+    final top = math.max<double>(4, origin.dy - height - 8);
     _popoverRect = Rect.fromLTWH(left, top, width, height);
     _alternatesOverlay = OverlayEntry(
       builder: (context) => Positioned(
@@ -152,7 +198,9 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
                         : Theme.of(context).colorScheme.surfaceContainerHigh,
                     child: Center(
                       child: Text(
-                        widget.textKey.alternates[i],
+                        widget.showSecondary
+                            ? widget.textKey.alternates[i].toUpperCase()
+                            : widget.textKey.alternates[i],
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
@@ -169,6 +217,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   @override
   void dispose() {
     _longPressTimer?.cancel();
+    _spaceTrackTimer?.cancel();
     _removeAlternatesOverlay();
     _removeKeyPreview();
     super.dispose();
@@ -248,26 +297,26 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     return Semantics(
       button: true,
       label: widget.textKey.getText(secondary: widget.showSecondary),
-      child: Transform.scale(
-        scale: widget.feedback.enableVisualFeedback && _pressed ? .96 : 1,
-        child: Container(
-          margin: theme.margin,
-          clipBehavior: Clip.hardEdge,
-          decoration: BoxDecoration(
-            borderRadius: theme.borderRadius,
-            border: theme.border,
-            boxShadow: theme.boxShadow,
-            gradient: theme.gradient,
-            color: widget.feedback.enableVisualFeedback && _pressed
-                ? colors.primaryContainer
-                : theme.backgroundColor ?? colors.surface,
-          ),
-          child: Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: _down,
-            onPointerMove: _move,
-            onPointerUp: _up,
-            onPointerCancel: _cancel,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: _cancel,
+        child: Transform.scale(
+          scale: widget.feedback.enableVisualFeedback && _pressed ? .96 : 1,
+          child: Container(
+            margin: theme.margin,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              borderRadius: theme.borderRadius,
+              border: theme.border,
+              boxShadow: theme.boxShadow,
+              gradient: theme.gradient,
+              color: widget.feedback.enableVisualFeedback && _pressed
+                  ? colors.primaryContainer
+                  : theme.backgroundColor ?? colors.surface,
+            ),
             child: IconTheme(
               data: IconThemeData(
                 size: theme.iconSize,
@@ -290,6 +339,7 @@ class ActionKeyWidget extends StatefulWidget {
     required this.onTapUp,
     required this.feedback,
     this.capsLock = false,
+    this.onDeleteWord,
     super.key,
   });
 
@@ -299,6 +349,7 @@ class ActionKeyWidget extends StatefulWidget {
   final VoidCallback onTapUp;
   final OnscreenKeyboardFeedback feedback;
   final bool capsLock;
+  final VoidCallback? onDeleteWord;
 
   @override
   State<ActionKeyWidget> createState() => _ActionKeyWidgetState();
@@ -308,10 +359,13 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
   Timer? _repeatTimer;
   int? _pointer;
   int _repeatCount = 0;
+  Offset? _downPosition;
+  int _wordDeleteCount = 0;
 
   void _down(PointerDownEvent event) {
     if (_pointer != null) return;
     _pointer = event.pointer;
+    _downPosition = event.position;
     setState(() {});
     widget.actionKey.onTapDown?.call(context);
     widget.onTapDown();
@@ -320,6 +374,26 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
     }
     if (widget.actionKey.repeatable) {
       _repeatTimer = Timer(const Duration(milliseconds: 400), _repeat);
+    }
+  }
+
+  void _move(PointerMoveEvent event) {
+    if (_pointer != event.pointer ||
+        widget.actionKey.name != ActionKeyType.backspace ||
+        widget.onDeleteWord == null ||
+        _downPosition == null) {
+      return;
+    }
+    final distance = _downPosition!.dx - event.position.dx;
+    final count = distance < 28 ? 0 : 1 + ((distance - 28) ~/ 38);
+    while (_wordDeleteCount < count) {
+      _repeatTimer?.cancel();
+      _repeatTimer = null;
+      _wordDeleteCount++;
+      widget.onDeleteWord?.call();
+      if (widget.feedback.enableHaptics) {
+        unawaited(HapticFeedback.selectionClick());
+      }
     }
   }
 
@@ -354,6 +428,8 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
     _repeatTimer?.cancel();
     _repeatTimer = null;
     _repeatCount = 0;
+    _wordDeleteCount = 0;
+    _downPosition = null;
     _pointer = null;
     if (mounted) setState(() {});
   }
@@ -406,25 +482,26 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
       button: true,
       toggled: isShift ? widget.pressed : null,
       label: semanticLabel,
-      child: Transform.scale(
-        scale: visuallyPressed ? .96 : 1,
-        child: Container(
-          margin: theme.margin,
-          clipBehavior: Clip.hardEdge,
-          decoration: BoxDecoration(
-            borderRadius: theme.borderRadius,
-            border: theme.border,
-            boxShadow: theme.boxShadow,
-            gradient: theme.gradient,
-            color: visuallyPressed
-                ? theme.pressedBackgroundColor ?? colors.primary
-                : theme.backgroundColor ?? colors.surfaceContainer,
-          ),
-          child: Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: _down,
-            onPointerUp: _up,
-            onPointerCancel: _cancel,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: _cancel,
+        child: Transform.scale(
+          scale: visuallyPressed ? .96 : 1,
+          child: Container(
+            margin: theme.margin,
+            clipBehavior: Clip.hardEdge,
+            decoration: BoxDecoration(
+              borderRadius: theme.borderRadius,
+              border: theme.border,
+              boxShadow: theme.boxShadow,
+              gradient: theme.gradient,
+              color: visuallyPressed
+                  ? theme.pressedBackgroundColor ?? colors.primary
+                  : theme.backgroundColor ?? colors.surfaceContainer,
+            ),
             child: IconTheme(
               data: IconThemeData(
                 size: theme.iconSize,
