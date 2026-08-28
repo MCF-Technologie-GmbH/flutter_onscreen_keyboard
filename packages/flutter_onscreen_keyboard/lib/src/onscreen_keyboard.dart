@@ -632,6 +632,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   /// Whether the keyboard is currently visible.
   bool _visible = false;
+  Timer? _focusVisibilityTimer;
 
   @override
   bool get isVisible => widget.enabled && _visible;
@@ -640,16 +641,67 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   void open() {
     if (!widget.enabled) return;
     setState(() => _visible = true);
+    _ensureActiveFieldVisible();
+  }
+
+  void _ensureActiveFieldVisible() {
+    if (widget.presentation != OnscreenKeyboardPresentation.docked) return;
+    final field = activeTextField;
+    if (field == null) return;
+    final reducedMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    _focusVisibilityTimer?.cancel();
+    _focusVisibilityTimer = Timer(
+      reducedMotion ? Duration.zero : const Duration(milliseconds: 190),
+      () {
+        _focusVisibilityTimer = null;
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => unawaited(_scrollFieldVisible(field, reducedMotion)),
+        );
+      },
+    );
+  }
+
+  Future<void> _scrollFieldVisible(
+    OnscreenKeyboardFieldState field,
+    bool reducedMotion,
+  ) async {
+    if (!mounted ||
+        field != activeTextField ||
+        !field.focusNode.hasFocus ||
+        field is! State) {
+      return;
+    }
+    final fieldState = field as State;
+    if (!fieldState.mounted) return;
+    final renderObject = fieldState.context.findRenderObject();
+    final scrollable = Scrollable.maybeOf(
+      fieldState.context,
+      axis: Axis.vertical,
+    );
+    if (renderObject == null || scrollable == null) return;
+    await scrollable.position.ensureVisible(
+      renderObject,
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      curve: const Cubic(.23, 1, .32, 1),
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    );
   }
 
   @override
   void close() {
+    _focusVisibilityTimer?.cancel();
     detachTextField();
     setState(() => _visible = false);
   }
 
   @override
-  void hide() => setState(() => _visible = false);
+  void hide() {
+    _focusVisibilityTimer?.cancel();
+    setState(() => _visible = false);
+  }
 
   @override
   Locale get locale => _locale;
@@ -798,6 +850,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   void attachTextField(OnscreenKeyboardFieldState state) {
     _activeTextField.value = state;
     _ensureValidMode();
+    if (_visible) _ensureActiveFieldVisible();
     unawaited(_refreshSuggestions());
   }
 
@@ -1149,14 +1202,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       curve: const Cubic(.23, 1, .32, 1),
       tween: Tween(end: keyboardVisible ? targetHeight : 0),
       builder: (context, inset, _) => Stack(
+        fit: StackFit.expand,
         children: [
           MediaQuery(
-            data: media.copyWith(
-              viewInsets: media.viewInsets.copyWith(
-                bottom: media.viewInsets.bottom + inset,
-              ),
+            data: media,
+            child: Padding(
+              padding: EdgeInsets.only(bottom: inset),
+              child: widget.child,
             ),
-            child: widget.child,
           ),
           Align(
             alignment: Alignment.bottomCenter,
@@ -1240,6 +1293,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   @override
   void dispose() {
     _requestToken?.cancel();
+    _focusVisibilityTimer?.cancel();
     _activeTextField.dispose();
     _alignListener.dispose();
     _draggingListener.dispose();

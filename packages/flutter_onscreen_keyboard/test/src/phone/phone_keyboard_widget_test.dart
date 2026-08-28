@@ -20,19 +20,17 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('docked keyboard propagates an animated bottom inset', (
+  testWidgets('docked keyboard reserves an animated bottom inset', (
     tester,
   ) async {
-    double observedInset = 0;
+    final childKey = GlobalKey();
     await tester.pumpWidget(
       MaterialApp(
         home: OnscreenKeyboard(
           presentation: OnscreenKeyboardPresentation.docked,
-          child: Builder(
-            builder: (context) {
-              observedInset = MediaQuery.viewInsetsOf(context).bottom;
-              return const Scaffold(body: OnscreenKeyboardTextField());
-            },
+          child: SizedBox.expand(
+            key: childKey,
+            child: const Scaffold(body: OnscreenKeyboardTextField()),
           ),
         ),
       ),
@@ -42,7 +40,9 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 180));
 
-    expect(observedInset, greaterThan(200));
+    final child = tester.getRect(find.byKey(childKey));
+    final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+    expect(child.bottom, lessThanOrEqualTo(keyboard.top));
     expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
   });
 
@@ -76,6 +76,55 @@ void main() {
     expect(bottomRow.bottom, lessThanOrEqualTo(720));
     expect(bottomRow.top, greaterThan(keyboard.top));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('docked keyboard scrolls the focused field above its panel', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 640);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final focusNode = FocusNode();
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.docked,
+          child: Scaffold(
+            body: SingleChildScrollView(
+              child: Column(
+                children: [
+                  const SizedBox(height: 700),
+                  OnscreenKeyboardTextField(focusNode: focusNode),
+                  const SizedBox(height: 80),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    focusNode.requestFocus();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 190));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    final field = tester.getRect(find.byType(OnscreenKeyboardTextField));
+    final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+    final scrollable = tester.getRect(find.byType(SingleChildScrollView));
+    final fieldMedia = MediaQuery.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    );
+    expect(
+      field.bottom,
+      lessThanOrEqualTo(keyboard.top),
+      reason:
+          'field=$field keyboard=$keyboard scrollable=$scrollable '
+          'inset=${fieldMedia.viewInsets.bottom}',
+    );
   });
 
   testWidgets('programmatic focus tolerates an unset selection', (
