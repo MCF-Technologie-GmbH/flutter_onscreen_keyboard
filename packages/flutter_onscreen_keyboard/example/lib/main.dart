@@ -162,9 +162,12 @@ class PlaygroundScreen extends StatelessWidget {
           const SizedBox(height: 24),
           const OnscreenKeyboardTextField(
             autofocus: true,
-            textInputAction: TextInputAction.next,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            minLines: 2,
+            maxLines: 3,
             decoration: InputDecoration(
-              labelText: 'Ordinary text',
+              labelText: 'Typing and Return',
               hintText: 'Try “hello” or “hallo”',
             ),
           ),
@@ -185,11 +188,8 @@ class PlaygroundScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           const OnscreenKeyboardTextField(
-            keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            minLines: 3,
-            maxLines: 5,
-            decoration: InputDecoration(labelText: 'Multiline notes'),
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(labelText: 'Ordinary single-line'),
           ),
           const SizedBox(height: 32),
         ],

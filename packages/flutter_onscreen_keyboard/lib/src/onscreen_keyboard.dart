@@ -210,7 +210,7 @@ No OnscreenKeyboard found in context. Did you wrap your app with OnscreenKeyboar
 class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     implements OnscreenKeyboardController {
   /// Whether to show the secondary keys.
-  bool get _showSecondary => _capsLock ^ _shift;
+  bool get _showSecondary => _capsLock || _shift;
 
   final _pressedActionKeys = <String>{};
   bool _shift = false;
@@ -501,18 +501,22 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       if (name == ActionKeyType.capslock || doubleTap) {
         _capsLock = !_capsLock;
         _shift = false;
+      } else if (_capsLock) {
+        _capsLock = false;
+        _shift = false;
       } else {
         _shift = !_shift;
       }
-      if (_shift || _capsLock) {
+      _pressedActionKeys
+        ..remove(ActionKeyType.shift)
+        ..remove(ActionKeyType.capslock);
+      if (_capsLock) {
+        _pressedActionKeys.add(ActionKeyType.capslock);
+      } else if (_shift) {
         _pressedActionKeys.add(ActionKeyType.shift);
-      } else {
-        _pressedActionKeys
-          ..remove(ActionKeyType.shift)
-          ..remove(ActionKeyType.capslock);
       }
     });
-    _lastShiftTap = now;
+    _lastShiftTap = doubleTap || name == ActionKeyType.capslock ? null : now;
   }
 
   /// Safely call [setState] after the current frame.

@@ -219,17 +219,55 @@ void main() {
   ) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    expect(semantics('Shift off'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_capslock_rounded), findsNothing);
 
     await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
-    await tester.tap(find.text('q'));
+    await tester.pump();
+    expect(semantics('Shift on'), findsOneWidget);
+    await tester.tap(find.text('Q'));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
     await tester.tap(find.text('w'));
     expect(controller.text, 'Qw');
 
     await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
     await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
-    await tester.tap(find.text('e'));
-    await tester.tap(find.text('r'));
+    await tester.pump();
+    expect(semantics('Caps Lock on'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_capslock_rounded), findsOneWidget);
+    await tester.tap(find.text('E'));
+    await tester.tap(find.text('R'));
     expect(controller.text, 'QwER');
+
+    await tester.tap(find.byIcon(Icons.keyboard_capslock_rounded));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.text('t'));
+    expect(controller.text, 'QwERt');
+  });
+
+  testWidgets('multiline field shows Return and inserts a newline', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      minLines: 2,
+      maxLines: 3,
+    );
+
+    expect(find.byIcon(Icons.keyboard_return_rounded), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.keyboard_return_rounded));
+    expect(controller.text, '\n');
   });
 
   testWidgets('repeat backspace accelerates and cancels on release', (
@@ -376,6 +414,10 @@ Future<void> _pumpKeyboard(
   required TextEditingController controller,
   OnscreenKeyboardLanguageModel? languageModel,
   OnscreenKeyboardTypingMode typingMode = OnscreenKeyboardTypingMode.off,
+  TextInputType? keyboardType,
+  TextInputAction? textInputAction,
+  int? minLines,
+  int? maxLines = 1,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -385,7 +427,13 @@ Future<void> _pumpKeyboard(
         typingMode: typingMode,
         feedback: const OnscreenKeyboardFeedback(enableHaptics: false),
         child: Scaffold(
-          body: OnscreenKeyboardTextField(controller: controller),
+          body: OnscreenKeyboardTextField(
+            controller: controller,
+            keyboardType: keyboardType,
+            textInputAction: textInputAction,
+            minLines: minLines,
+            maxLines: maxLines,
+          ),
         ),
       ),
     ),

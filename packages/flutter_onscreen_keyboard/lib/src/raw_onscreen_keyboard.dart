@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
+import 'package:flutter_onscreen_keyboard/src/constants/action_key_type.dart';
 import 'package:flutter_onscreen_keyboard/src/widgets/keys.dart';
 
 class RawOnscreenKeyboard extends StatefulWidget {
@@ -193,9 +194,17 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
                             ),
                             ActionKey() => ActionKeyWidget(
                               actionKey: key,
-                              pressed: widget.pressedActionKeys.contains(
-                                key.name,
-                              ),
+                              pressed:
+                                  widget.pressedActionKeys.contains(key.name) ||
+                                  (key.name == ActionKeyType.shift &&
+                                      widget.pressedActionKeys.contains(
+                                        ActionKeyType.capslock,
+                                      )),
+                              capsLock:
+                                  key.name == ActionKeyType.shift &&
+                                  widget.pressedActionKeys.contains(
+                                    ActionKeyType.capslock,
+                                  ),
                               feedback: widget.feedback,
                               onTapDown: () => widget.onKeyDown(key),
                               onTapUp: () => widget.onKeyUp(key),

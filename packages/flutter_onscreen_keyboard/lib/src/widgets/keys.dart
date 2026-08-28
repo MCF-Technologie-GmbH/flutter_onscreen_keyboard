@@ -6,6 +6,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
+import 'package:flutter_onscreen_keyboard/src/constants/action_key_type.dart';
 import 'package:flutter_onscreen_keyboard/src/utils/extensions.dart';
 
 class TextKeyWidget extends StatefulWidget {
@@ -288,6 +289,7 @@ class ActionKeyWidget extends StatefulWidget {
     required this.onTapDown,
     required this.onTapUp,
     required this.feedback,
+    this.capsLock = false,
     super.key,
   });
 
@@ -296,6 +298,7 @@ class ActionKeyWidget extends StatefulWidget {
   final VoidCallback onTapDown;
   final VoidCallback onTapUp;
   final OnscreenKeyboardFeedback feedback;
+  final bool capsLock;
 
   @override
   State<ActionKeyWidget> createState() => _ActionKeyWidgetState();
@@ -365,16 +368,27 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final theme = context.theme.actionKeyThemeData;
-    Widget child = switch (widget.actionKey.child) {
+    final isShift = widget.actionKey.name == ActionKeyType.shift;
+    final visualChild = isShift && widget.capsLock
+        ? const Icon(Icons.keyboard_capslock_rounded)
+        : widget.actionKey.child;
+    final semanticLabel = isShift
+        ? widget.capsLock
+              ? 'Caps Lock on'
+              : widget.pressed
+              ? 'Shift on'
+              : 'Shift off'
+        : widget.actionKey.label ?? widget.actionKey.name;
+    Widget child = switch (visualChild) {
       Icon() => Padding(
         padding:
             theme.padding ??
             (theme.fitChild ? const EdgeInsets.all(28) : EdgeInsets.zero),
-        child: widget.actionKey.child,
+        child: visualChild,
       ),
       Widget() => Padding(
         padding: theme.padding ?? EdgeInsets.zero,
-        child: widget.actionKey.child,
+        child: visualChild,
       ),
       null => Padding(
         padding: theme.padding ?? EdgeInsets.zero,
@@ -390,7 +404,8 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
         (widget.feedback.enableVisualFeedback && _pointer != null);
     return Semantics(
       button: true,
-      label: widget.actionKey.label ?? widget.actionKey.name,
+      toggled: isShift ? widget.pressed : null,
+      label: semanticLabel,
       child: Transform.scale(
         scale: visuallyPressed ? .96 : 1,
         child: Container(
