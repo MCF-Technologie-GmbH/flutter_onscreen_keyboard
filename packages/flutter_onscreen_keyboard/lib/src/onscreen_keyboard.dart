@@ -525,7 +525,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   bool _visible = false;
 
   @override
-  bool get isVisible => _visible;
+  bool get isVisible => widget.enabled && _visible;
 
   @override
   void open() {
@@ -859,6 +859,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   Widget _buildDocked(BuildContext context, KeyboardLayout resolvedLayout) {
     final media = MediaQuery.of(context);
     final reducedMotion = media.disableAnimations;
+    final keyboardVisible = widget.enabled && _visible;
     final maximumHeight = media.size.height * .52;
     final minimumHeight = maximumHeight < 220 ? maximumHeight : 220.0;
     final targetHeight =
@@ -871,7 +872,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           ? Duration.zero
           : const Duration(milliseconds: 180),
       curve: const Cubic(.23, 1, .32, 1),
-      tween: Tween(end: _visible ? targetHeight : 0),
+      tween: Tween(end: keyboardVisible ? targetHeight : 0),
       builder: (context, inset, _) => Stack(
         children: [
           MediaQuery(
@@ -992,7 +993,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                 widget.child,
 
                 // keyboard
-                if (_visible)
+                if (widget.enabled && _visible)
                   Positioned.fill(
                     child: Builder(
                       builder: (context) {
