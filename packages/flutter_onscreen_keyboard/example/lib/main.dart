@@ -132,8 +132,18 @@ class PlaygroundScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
-          _SwipeDiagnosticsCard(diagnostic: swipeDiagnostic),
-          const SizedBox(height: 20),
+          const OnscreenKeyboardTextField(
+            autofocus: true,
+            keyboardType: TextInputType.multiline,
+            textInputAction: TextInputAction.newline,
+            minLines: 2,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: 'Typing and Return',
+              hintText: 'Try “hello” or “hallo”',
+            ),
+          ),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
@@ -167,19 +177,9 @@ class PlaygroundScreen extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 24),
-          const OnscreenKeyboardTextField(
-            autofocus: true,
-            keyboardType: TextInputType.multiline,
-            textInputAction: TextInputAction.newline,
-            minLines: 2,
-            maxLines: 3,
-            decoration: InputDecoration(
-              labelText: 'Typing and Return',
-              hintText: 'Try “hello” or “hallo”',
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+          _SwipeDiagnosticsCard(diagnostic: swipeDiagnostic),
+          const SizedBox(height: 20),
           const OnscreenKeyboardTextField(
             keyboardType: TextInputType.emailAddress,
             textInputAction: TextInputAction.next,

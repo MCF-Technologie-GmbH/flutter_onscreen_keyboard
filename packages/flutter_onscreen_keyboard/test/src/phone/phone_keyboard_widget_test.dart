@@ -92,14 +92,12 @@ void main() {
         home: OnscreenKeyboard(
           presentation: OnscreenKeyboardPresentation.docked,
           child: Scaffold(
-            body: SingleChildScrollView(
-              child: Column(
-                children: [
-                  const SizedBox(height: 700),
-                  OnscreenKeyboardTextField(focusNode: focusNode),
-                  const SizedBox(height: 80),
-                ],
-              ),
+            body: ListView(
+              children: [
+                const SizedBox(height: 400),
+                OnscreenKeyboardTextField(focusNode: focusNode),
+                const SizedBox(height: 700),
+              ],
             ),
           ),
         ),
@@ -114,7 +112,7 @@ void main() {
 
     final field = tester.getRect(find.byType(OnscreenKeyboardTextField));
     final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
-    final scrollable = tester.getRect(find.byType(SingleChildScrollView));
+    final scrollable = tester.getRect(find.byType(ListView));
     final fieldMedia = MediaQuery.of(
       tester.element(find.byType(OnscreenKeyboardTextField)),
     );
