@@ -1,6 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -34,15 +35,23 @@ class TextKeyWidget extends StatefulWidget {
 class _TextKeyWidgetState extends State<TextKeyWidget> {
   Timer? _longPressTimer;
   OverlayEntry? _alternatesOverlay;
+  OverlayEntry? _keyPreviewOverlay;
   int? _pointer;
   int _alternateIndex = 0;
   bool _pressed = false;
   Rect? _popoverRect;
+  Offset? _downPosition;
 
   void _down(PointerDownEvent event) {
     if (_pointer != null) return;
     _pointer = event.pointer;
+    _downPosition = event.position;
     setState(() => _pressed = true);
+    if (widget.feedback.enableVisualFeedback &&
+        widget.textKey.child == null &&
+        widget.textKey.primary.length <= 2) {
+      _showKeyPreview();
+    }
     if (widget.feedback.enableHaptics) {
       unawaited(HapticFeedback.selectionClick());
     }
@@ -58,6 +67,10 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   }
 
   void _move(PointerMoveEvent event) {
+    if (_downPosition case final origin?
+        when (event.position - origin).distance >= 10) {
+      _removeKeyPreview();
+    }
     final rect = _popoverRect;
     if (_alternatesOverlay == null || rect == null) return;
     final index =
@@ -96,8 +109,10 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     _longPressTimer = null;
     _removeAlternatesOverlay();
     _alternatesOverlay = null;
+    _removeKeyPreview();
     _popoverRect = null;
     _pointer = null;
+    _downPosition = null;
     if (mounted) setState(() => _pressed = false);
   }
 
@@ -110,6 +125,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   }
 
   void _showAlternates() {
+    _removeKeyPreview();
     final box = context.findRenderObject()! as RenderBox;
     final origin = box.localToGlobal(Offset.zero);
     const itemWidth = 44.0;
@@ -156,7 +172,57 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   void dispose() {
     _longPressTimer?.cancel();
     _removeAlternatesOverlay();
+    _removeKeyPreview();
     super.dispose();
+  }
+
+  void _showKeyPreview() {
+    final box = context.findRenderObject()! as RenderBox;
+    final origin = box.localToGlobal(Offset.zero);
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final width = box.size.width.clamp(52.0, 72.0);
+    const height = 58.0;
+    final left = (origin.dx + (box.size.width - width) / 2).clamp(
+      4.0,
+      screenWidth - width - 4,
+    );
+    final top = math.max<double>(4, origin.dy - height - 5);
+    _keyPreviewOverlay = OverlayEntry(
+      builder: (context) => Positioned(
+        left: left,
+        top: top,
+        width: width,
+        height: height,
+        child: IgnorePointer(
+          child: Material(
+            elevation: 5,
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(
+                color: Theme.of(context).colorScheme.outlineVariant,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                widget.textKey.getText(secondary: widget.showSecondary),
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    Overlay.of(context).insert(_keyPreviewOverlay!);
+  }
+
+  void _removeKeyPreview() {
+    final entry = _keyPreviewOverlay;
+    _keyPreviewOverlay = null;
+    if (entry == null || !entry.mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (entry.mounted) entry.remove();
+    });
   }
 
   @override
@@ -186,30 +252,33 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     return Semantics(
       button: true,
       label: widget.textKey.getText(secondary: widget.showSecondary),
-      child: Container(
-        margin: theme.margin,
-        clipBehavior: Clip.hardEdge,
-        decoration: BoxDecoration(
-          borderRadius: theme.borderRadius,
-          border: theme.border,
-          boxShadow: theme.boxShadow,
-          gradient: theme.gradient,
-          color: widget.feedback.enableVisualFeedback && _pressed
-              ? colors.primaryContainer
-              : theme.backgroundColor ?? colors.surface,
-        ),
-        child: Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: _down,
-          onPointerMove: _move,
-          onPointerUp: _up,
-          onPointerCancel: _cancel,
-          child: IconTheme(
-            data: IconThemeData(
-              size: theme.iconSize,
-              color: theme.foregroundColor ?? colors.onSurface,
+      child: Transform.scale(
+        scale: widget.feedback.enableVisualFeedback && _pressed ? .96 : 1,
+        child: Container(
+          margin: theme.margin,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            borderRadius: theme.borderRadius,
+            border: theme.border,
+            boxShadow: theme.boxShadow,
+            gradient: theme.gradient,
+            color: widget.feedback.enableVisualFeedback && _pressed
+                ? colors.primaryContainer
+                : theme.backgroundColor ?? colors.surface,
+          ),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _down,
+            onPointerMove: _move,
+            onPointerUp: _up,
+            onPointerCancel: _cancel,
+            child: IconTheme(
+              data: IconThemeData(
+                size: theme.iconSize,
+                color: theme.foregroundColor ?? colors.onSurface,
+              ),
+              child: child,
             ),
-            child: child,
           ),
         ),
       ),
@@ -245,6 +314,7 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
   void _down(PointerDownEvent event) {
     if (_pointer != null) return;
     _pointer = event.pointer;
+    setState(() {});
     widget.actionKey.onTapDown?.call(context);
     widget.onTapDown();
     if (widget.feedback.enableHaptics) {
@@ -287,6 +357,7 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
     _repeatTimer = null;
     _repeatCount = 0;
     _pointer = null;
+    if (mounted) setState(() {});
   }
 
   @override
@@ -312,38 +383,47 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
       ),
       null => Padding(
         padding: theme.padding ?? EdgeInsets.zero,
-        child: Text(widget.actionKey.label ?? widget.actionKey.name),
+        child: Text(
+          widget.actionKey.label ?? widget.actionKey.name,
+          style: theme.textStyle,
+        ),
       ),
     };
     child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
+    final visuallyPressed =
+        widget.pressed ||
+        (widget.feedback.enableVisualFeedback && _pointer != null);
     return Semantics(
       button: true,
       label: widget.actionKey.label ?? widget.actionKey.name,
-      child: Container(
-        margin: theme.margin,
-        clipBehavior: Clip.hardEdge,
-        decoration: BoxDecoration(
-          borderRadius: theme.borderRadius,
-          border: theme.border,
-          boxShadow: theme.boxShadow,
-          gradient: theme.gradient,
-          color: widget.pressed
-              ? theme.pressedBackgroundColor ?? colors.primary
-              : theme.backgroundColor ?? colors.surfaceContainer,
-        ),
-        child: Listener(
-          behavior: HitTestBehavior.opaque,
-          onPointerDown: _down,
-          onPointerUp: _up,
-          onPointerCancel: _cancel,
-          child: IconTheme(
-            data: IconThemeData(
-              size: theme.iconSize,
-              color: widget.pressed
-                  ? theme.pressedForegroundColor ?? colors.onPrimary
-                  : theme.foregroundColor ?? colors.onSurface,
+      child: Transform.scale(
+        scale: visuallyPressed ? .96 : 1,
+        child: Container(
+          margin: theme.margin,
+          clipBehavior: Clip.hardEdge,
+          decoration: BoxDecoration(
+            borderRadius: theme.borderRadius,
+            border: theme.border,
+            boxShadow: theme.boxShadow,
+            gradient: theme.gradient,
+            color: visuallyPressed
+                ? theme.pressedBackgroundColor ?? colors.primary
+                : theme.backgroundColor ?? colors.surfaceContainer,
+          ),
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _down,
+            onPointerUp: _up,
+            onPointerCancel: _cancel,
+            child: IconTheme(
+              data: IconThemeData(
+                size: theme.iconSize,
+                color: visuallyPressed
+                    ? theme.pressedForegroundColor ?? colors.onPrimary
+                    : theme.foregroundColor ?? colors.onSurface,
+              ),
+              child: child,
             ),
-            child: child,
           ),
         ),
       ),

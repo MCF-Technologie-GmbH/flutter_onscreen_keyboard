@@ -14,16 +14,25 @@ class RawOnscreenKeyboard extends StatefulWidget {
     required this.mode,
     super.key,
     this.aspectRatio,
+    this.fillAvailableSpace = false,
     this.pressedActionKeys = const {},
     this.showSecondary = false,
     this.onAlternate,
     this.onSwipe,
     this.onSwipeUpdate,
+    this.onSwipeData,
+    this.onSwipeDataUpdate,
     this.feedback = const OnscreenKeyboardFeedback(),
   });
 
   final KeyboardLayout layout;
   final double? aspectRatio;
+
+  /// Whether the keyboard should fill tight parent constraints.
+  ///
+  /// Docked keyboards use this so their rows share the height left below the
+  /// utility bar. Floating keyboards retain the layout aspect ratio.
+  final bool fillAvailableSpace;
   final ValueChanged<OnscreenKeyboardKey> onKeyDown;
   final ValueChanged<OnscreenKeyboardKey> onKeyUp;
   final Set<String> pressedActionKeys;
@@ -32,6 +41,8 @@ class RawOnscreenKeyboard extends StatefulWidget {
   final ValueChanged<String>? onAlternate;
   final ValueChanged<List<String>>? onSwipe;
   final ValueChanged<List<String>>? onSwipeUpdate;
+  final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeData;
+  final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeDataUpdate;
   final OnscreenKeyboardFeedback feedback;
 
   @override
@@ -41,13 +52,18 @@ class RawOnscreenKeyboard extends StatefulWidget {
 class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   final List<(GlobalKey, TextKey)> _textKeys = [];
   final List<String> _trace = [];
+  final List<Offset> _points = [];
+  final GlobalKey _surfaceKey = GlobalKey();
   int? _pointer;
   Offset? _origin;
   bool _swiping = false;
   Timer? _swipePreviewTimer;
 
+  bool get _hasSwipeHandler =>
+      widget.onSwipe != null || widget.onSwipeData != null;
+
   void _pointerDown(PointerDownEvent event) {
-    if (_pointer != null || widget.onSwipe == null) return;
+    if (_pointer != null || !_hasSwipeHandler) return;
     final key = _hit(event.position);
     if (key == null) return;
     _pointer = event.pointer;
@@ -56,6 +72,10 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     _trace
       ..clear()
       ..add(key.primary);
+    _points
+      ..clear()
+      ..add(_normalize(event.position));
+    setState(() {});
   }
 
   void _pointerMove(PointerMoveEvent event) {
@@ -64,6 +84,11 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
       _swiping = true;
     }
     if (!_swiping) return;
+    final point = _normalize(event.position);
+    if (_points.isEmpty || (_points.last - point).distance >= .002) {
+      _points.add(point);
+      setState(() {});
+    }
     final key = _hit(event.position);
     if (key != null && (_trace.isEmpty || _trace.last != key.primary)) {
       _trace.add(key.primary);
@@ -72,11 +97,15 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   }
 
   void _scheduleSwipePreview() {
-    if (_trace.length < 2 || widget.onSwipeUpdate == null) return;
+    if (_trace.length < 2 && _points.length < 3) return;
+    if (widget.onSwipeUpdate == null && widget.onSwipeDataUpdate == null) {
+      return;
+    }
     _swipePreviewTimer?.cancel();
     _swipePreviewTimer = Timer(const Duration(milliseconds: 32), () {
       if (!mounted || !_swiping || _pointer == null) return;
       widget.onSwipeUpdate?.call(List.unmodifiable(_trace));
+      widget.onSwipeDataUpdate?.call(_snapshot());
     });
   }
 
@@ -85,11 +114,42 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     _swipePreviewTimer?.cancel();
     if (_swiping && _trace.length >= 2) {
       widget.onSwipe?.call(List.unmodifiable(_trace));
+      widget.onSwipeData?.call(_snapshot());
     }
     _pointer = null;
     _origin = null;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _swiping = false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _swiping = false;
+      if (mounted) setState(_points.clear);
+    });
   }
+
+  Offset _normalize(Offset globalPosition) {
+    final context = _surfaceKey.currentContext;
+    if (context == null) return Offset.zero;
+    final box = context.findRenderObject()! as RenderBox;
+    final local = box.globalToLocal(globalPosition);
+    return Offset(
+      (local.dx / box.size.width).clamp(0, 1),
+      (local.dy / box.size.height).clamp(0, 1),
+    );
+  }
+
+  OnscreenKeyboardSwipeData _snapshot() => OnscreenKeyboardSwipeData(
+    trace: List.unmodifiable(_trace),
+    points: List.unmodifiable(_points),
+    keyCenters: {
+      for (final entry in _textKeys)
+        if (entry.$1.currentContext case final context?)
+          entry.$2.primary: _normalize(
+            (context.findRenderObject()! as RenderBox).localToGlobal(
+              (context.findRenderObject()! as RenderBox).size.center(
+                Offset.zero,
+              ),
+            ),
+          ),
+    },
+  );
 
   TextKey? _hit(Offset globalPosition) {
     for (final entry in _textKeys) {
@@ -109,22 +169,11 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   Widget build(BuildContext context) {
     _textKeys.clear();
     final activeMode = widget.layout.modes[widget.mode]!;
-    return Listener(
-      onPointerDown: _pointerDown,
-      onPointerMove: _pointerMove,
-      onPointerUp: _pointerUp,
-      onPointerCancel: (_) {
-        _swipePreviewTimer?.cancel();
-        _pointer = null;
-        _origin = null;
-        _trace.clear();
-        _swiping = false;
-      },
-      child: AspectRatio(
-        aspectRatio: widget.aspectRatio ?? widget.layout.aspectRatio,
-        child: Material(
-          type: MaterialType.transparency,
-          child: Column(
+    final surface = Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        children: [
+          Column(
             spacing: activeMode.verticalSpacing,
             children: [
               for (final row in activeMode.rows)
@@ -155,7 +204,41 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
                 ),
             ],
           ),
-        ),
+          if (_swiping && _points.length >= 2)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: CustomPaint(
+                  painter: _SwipeTracePainter(
+                    points: List.of(_points),
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+    return Listener(
+      onPointerDown: _pointerDown,
+      onPointerMove: _pointerMove,
+      onPointerUp: _pointerUp,
+      onPointerCancel: (_) {
+        _swipePreviewTimer?.cancel();
+        _pointer = null;
+        _origin = null;
+        _trace.clear();
+        _points.clear();
+        _swiping = false;
+        if (mounted) setState(() {});
+      },
+      child: KeyedSubtree(
+        key: _surfaceKey,
+        child: widget.fillAvailableSpace
+            ? SizedBox.expand(child: surface)
+            : AspectRatio(
+                aspectRatio: widget.aspectRatio ?? widget.layout.aspectRatio,
+                child: surface,
+              ),
       ),
     );
   }
@@ -182,4 +265,43 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
       ),
     );
   }
+}
+
+class _SwipeTracePainter extends CustomPainter {
+  const _SwipeTracePainter({required this.points, required this.color});
+
+  final List<Offset> points;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path();
+    for (var index = 0; index < points.length; index++) {
+      final point = Offset(
+        points[index].dx * size.width,
+        points[index].dy * size.height,
+      );
+      if (index == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    final paint = Paint()
+      ..color = color.withValues(alpha: .62)
+      ..strokeWidth = 5
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+    canvas.drawPath(path, paint);
+    final end = Offset(
+      points.last.dx * size.width,
+      points.last.dy * size.height,
+    );
+    canvas.drawCircle(end, 7, Paint()..color = color.withValues(alpha: .82));
+  }
+
+  @override
+  bool shouldRepaint(_SwipeTracePainter oldDelegate) =>
+      oldDelegate.points != points || oldDelegate.color != color;
 }

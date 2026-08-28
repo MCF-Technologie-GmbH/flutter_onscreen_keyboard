@@ -60,6 +60,24 @@ void main() {
     expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
   });
 
+  testWidgets('docked keyboard keeps every row inside a desktop viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 720);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+
+    final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+    final bottomRow = tester.getRect(find.text('?123'));
+    expect(keyboard.height, greaterThan(250));
+    expect(bottomRow.bottom, lessThanOrEqualTo(720));
+    expect(bottomRow.top, greaterThan(keyboard.top));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('programmatic focus tolerates an unset selection', (
     tester,
   ) async {
@@ -271,6 +289,8 @@ void main() {
 
     expect(controller.text, 'hello');
     expect(languageModel.lastTrace, ['h', 'e', 'l', 'o']);
+    expect(languageModel.lastPoints, isNotEmpty);
+    expect(languageModel.lastKeyCenters, contains('h'));
   });
 
   testWidgets('phone keys stay compact and backspace is in the top row', (
@@ -280,11 +300,31 @@ void main() {
     await _pumpKeyboard(tester, controller: controller);
 
     final q = tester.widget<Text>(find.text('q'));
-    expect(q.style?.fontSize, 22);
+    expect(q.style?.fontSize, 24);
     expect(
       tester.getCenter(find.byIcon(Icons.backspace_outlined)).dy,
       lessThan(tester.getCenter(find.byIcon(Icons.arrow_upward_rounded)).dy),
     );
+  });
+
+  testWidgets('key press shows an immediate visual preview', (tester) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    final gesture = await tester.startGesture(tester.getCenter(find.text('q')));
+    await tester.pump();
+
+    final preview = find.byWidgetPredicate(
+      (widget) => widget is Material && widget.elevation == 5,
+    );
+    expect(preview, findsOneWidget);
+    expect(
+      find.descendant(of: preview, matching: find.text('q')),
+      findsOneWidget,
+    );
+
+    await gesture.up();
+    await tester.pump();
+    expect(preview, findsNothing);
   });
 
   testWidgets('autocorrect applies at a boundary and backspace undoes it', (
@@ -360,6 +400,8 @@ class _StaticLanguageModel implements OnscreenKeyboardLanguageModel {
 class _TrackingLanguageModel extends _StaticLanguageModel {
   int decodeCount = 0;
   List<String> lastTrace = const [];
+  List<Offset> lastPoints = const [];
+  Map<String, Offset> lastKeyCenters = const {};
 
   @override
   Future<List<OnscreenKeyboardSuggestion>> decodeSwipe(
@@ -367,6 +409,8 @@ class _TrackingLanguageModel extends _StaticLanguageModel {
   ) async {
     decodeCount++;
     lastTrace = request.trace;
+    lastPoints = request.points;
+    lastKeyCenters = request.keyCenters;
     return super.decodeSwipe(request);
   }
 }

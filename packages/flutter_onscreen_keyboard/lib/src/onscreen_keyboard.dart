@@ -731,15 +731,30 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
   }
 
-  Future<void> _previewSwipe(List<String> trace) =>
-      _decodeSwipe(trace, commit: false);
+  Future<void> _previewSwipeData(OnscreenKeyboardSwipeData data) =>
+      _decodeSwipe(
+        data.trace,
+        points: data.points,
+        keyCenters: data.keyCenters,
+        commit: false,
+      );
 
-  Future<void> _handleSwipe(List<String> trace) =>
-      _decodeSwipe(trace, commit: true);
+  bool get _swipeEnabled =>
+      _typingMode != OnscreenKeyboardTypingMode.off &&
+      (activeTextField?.fieldConfiguration.allowsSuggestions ?? false);
+
+  Future<void> _handleSwipeData(OnscreenKeyboardSwipeData data) => _decodeSwipe(
+    data.trace,
+    points: data.points,
+    keyCenters: data.keyCenters,
+    commit: true,
+  );
 
   Future<void> _decodeSwipe(
     List<String> trace, {
     required bool commit,
+    List<Offset> points = const [],
+    Map<String, Offset> keyCenters = const {},
   }) async {
     final model = widget.languageModel;
     final field = activeTextField;
@@ -760,6 +775,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           trace: trace,
           previousWord: words.isEmpty ? null : words.last,
           cancellationToken: token,
+          points: points,
+          keyCenters: keyCenters,
         ),
       );
       if (!mounted || token.isCancelled || token != _requestToken) return;
@@ -873,8 +890,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final media = MediaQuery.of(context);
     final reducedMotion = media.disableAnimations;
     final keyboardVisible = widget.enabled && _visible;
-    final maximumHeight = math.min(media.size.height * .52, 360).toDouble();
-    final minimumHeight = maximumHeight < 240 ? maximumHeight : 240.0;
+    final maximumHeight = math.min(media.size.height * .55, 440).toDouble();
+    final minimumHeight = maximumHeight < 270 ? maximumHeight : 270.0;
     final calculatedHeight =
         (media.size.width / resolvedLayout.aspectRatio +
                 (widget.showControlBar ? 44 : 0))
@@ -936,16 +953,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                   Expanded(
                     child: RawOnscreenKeyboard(
                       aspectRatio: widget.aspectRatio,
+                      fillAvailableSpace: true,
                       onKeyDown: _onKeyDown,
                       onKeyUp: _onKeyUp,
                       onAlternate: _insertText,
-                      onSwipe: _typingMode == OnscreenKeyboardTypingMode.off
-                          ? null
-                          : _handleSwipe,
-                      onSwipeUpdate:
-                          _typingMode == OnscreenKeyboardTypingMode.off
-                          ? null
-                          : _previewSwipe,
+                      onSwipeData: _swipeEnabled ? _handleSwipeData : null,
+                      onSwipeDataUpdate: _swipeEnabled
+                          ? _previewSwipeData
+                          : null,
                       feedback: widget.feedback,
                       layout: resolvedLayout,
                       mode: _mode,
@@ -1142,7 +1157,12 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                                                 onKeyDown: _onKeyDown,
                                                 onKeyUp: _onKeyUp,
                                                 onAlternate: _insertText,
-                                                onSwipe: _handleSwipe,
+                                                onSwipeData: _swipeEnabled
+                                                    ? _handleSwipeData
+                                                    : null,
+                                                onSwipeDataUpdate: _swipeEnabled
+                                                    ? _previewSwipeData
+                                                    : null,
                                                 feedback: widget.feedback,
                                                 layout: resolvedLayout,
                                                 mode: _mode,

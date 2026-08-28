@@ -119,7 +119,8 @@ class PlaygroundScreen extends StatelessWidget {
           Text(
             _dictionaryRoot.isEmpty
                 ? 'Demo vocabulary active'
-                : 'Full offline vocabulary active · 50,000 words per language',
+                : 'Full offline vocabulary active · 300,000 English · '
+                      '200,000 German',
             style: Theme.of(context).textTheme.labelMedium?.copyWith(
               color: Theme.of(context).colorScheme.primary,
             ),

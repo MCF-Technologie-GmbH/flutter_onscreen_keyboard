@@ -20,7 +20,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
   bool get _german => locale.languageCode.toLowerCase() == 'de';
 
   @override
-  double get aspectRatio => 3.6;
+  double get aspectRatio => 2.75;
 
   @override
   Map<String, KeyboardMode> get modes {

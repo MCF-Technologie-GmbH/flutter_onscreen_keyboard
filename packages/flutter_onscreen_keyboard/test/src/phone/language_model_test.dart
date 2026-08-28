@@ -57,6 +57,40 @@ void main() {
     expect(result.first.word, 'hello');
   });
 
+  test('keyboard geometry separates words with similar crossed keys', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('hello', 7),
+          OnscreenKeyboardLexiconEntry('hero', 7.4),
+        ],
+      },
+    );
+    const centers = <String, Offset>{
+      'e': Offset(.25, .1),
+      'r': Offset(.35, .1),
+      'o': Offset(.85, .1),
+      'h': Offset(.55, .5),
+      'l': Offset(.85, .5),
+    };
+    final result = await model.decodeSwipe(
+      OnscreenKeyboardSwipeRequest(
+        locale: const Locale('en'),
+        trace: const ['h', 'e', 'r', 'l', 'o'],
+        points: const [
+          Offset(.55, .5),
+          Offset(.25, .1),
+          Offset(.85, .5),
+          Offset(.85, .1),
+        ],
+        keyCenters: centers,
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result.first.word, 'hello');
+  });
+
   test('honors cancellation before expensive model work', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {'en': entries},

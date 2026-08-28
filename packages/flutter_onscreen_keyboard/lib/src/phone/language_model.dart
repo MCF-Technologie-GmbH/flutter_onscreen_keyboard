@@ -60,6 +60,8 @@ class OnscreenKeyboardSwipeRequest {
     required this.cancellationToken,
     this.previousWord,
     this.limit = 3,
+    this.points = const [],
+    this.keyCenters = const {},
   });
 
   final Locale locale;
@@ -67,6 +69,26 @@ class OnscreenKeyboardSwipeRequest {
   final String? previousWord;
   final int limit;
   final OnscreenKeyboardCancellationToken cancellationToken;
+
+  /// Normalized touch positions sampled continuously during the gesture.
+  final List<Offset> points;
+
+  /// Normalized center position of each printable key in the active layout.
+  final Map<String, Offset> keyCenters;
+}
+
+/// Geometry captured for one continuous swipe across the keyboard.
+@immutable
+class OnscreenKeyboardSwipeData {
+  const OnscreenKeyboardSwipeData({
+    required this.trace,
+    required this.points,
+    required this.keyCenters,
+  });
+
+  final List<String> trace;
+  final List<Offset> points;
+  final Map<String, Offset> keyCenters;
 }
 
 /// Pluggable, offline language assistance.
@@ -236,30 +258,95 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
     final language = request.locale.languageCode.toLowerCase();
     final learned = _learning[language]!;
     final candidates = <OnscreenKeyboardSuggestion>[];
-    final source =
-        _swipeEdgeIndex[language]?['${trace.first}\u0000${trace.last}'] ??
-        const <OnscreenKeyboardLexiconEntry>[];
+    final hasGeometry =
+        request.points.length >= 2 && request.keyCenters.isNotEmpty;
+    final source = _swipeCandidates(
+      language,
+      trace,
+      request.points,
+      request.keyCenters,
+    );
+    final sampledTrace = hasGeometry
+        ? _resample(request.points, 32)
+        : const <Offset>[];
     for (final entry in source) {
       request.cancellationToken.throwIfCancelled();
       final word = entry.word.toLowerCase();
-      if (word.characters.first != trace.first ||
-          word.characters.last != trace.last) {
+      if (!hasGeometry &&
+          (word.characters.first != trace.first ||
+              word.characters.last != trace.last)) {
         continue;
       }
       final skeleton = _collapseTrace(word.characters.toList());
-      final similarity = _swipeSimilarity(trace, skeleton);
-      if (similarity < 0.3) continue;
+      final orderedSimilarity = _swipeSimilarity(trace, skeleton);
+      var geometryScore = 0.0;
+      if (hasGeometry) {
+        final template = skeleton
+            .map((character) => request.keyCenters[character])
+            .whereType<Offset>()
+            .toList(growable: false);
+        if (template.length < 2) continue;
+        geometryScore = _geometrySimilarity(
+          sampledTrace,
+          _resample(template, 32),
+        );
+        if (geometryScore < .2 && orderedSimilarity < .45) continue;
+      } else if (orderedSimilarity < 0.3) {
+        continue;
+      }
       final learnedBoost = math.log(1 + (learned.words[word] ?? 0)) * 0.35;
+      final swipeScore = hasGeometry
+          ? geometryScore * 5.4 + orderedSimilarity * 0.8
+          : orderedSimilarity * 2.5 + 1;
       candidates.add(
         OnscreenKeyboardSuggestion(
           word: entry.word,
-          score: entry.weight + similarity * 2.5 + learnedBoost + 1,
-          confidence: (0.35 + similarity * 0.65).clamp(0, 1),
+          score: entry.weight + swipeScore + learnedBoost,
+          confidence: (0.18 + geometryScore * 0.68 + orderedSimilarity * 0.14)
+              .clamp(0, 1),
         ),
       );
     }
     candidates.sort((a, b) => b.score.compareTo(a.score));
     return candidates.take(request.limit).toList(growable: false);
+  }
+
+  Iterable<OnscreenKeyboardLexiconEntry> _swipeCandidates(
+    String language,
+    List<String> trace,
+    List<Offset> points,
+    Map<String, Offset> keyCenters,
+  ) {
+    final index = _swipeEdgeIndex[language];
+    if (index == null) return const [];
+    if (points.length < 2 || keyCenters.isEmpty) {
+      return index['${trace.first}\u0000${trace.last}'] ?? const [];
+    }
+    final starts = _nearestKeys(points.first, keyCenters, trace.first);
+    final ends = _nearestKeys(points.last, keyCenters, trace.last);
+    final candidates = <OnscreenKeyboardLexiconEntry>{};
+    for (final start in starts) {
+      for (final end in ends) {
+        candidates.addAll(index['$start\u0000$end'] ?? const []);
+      }
+    }
+    return candidates;
+  }
+
+  static List<String> _nearestKeys(
+    Offset point,
+    Map<String, Offset> centers,
+    String fallback,
+  ) {
+    final entries = centers.entries.toList()
+      ..sort(
+        (a, b) => (a.value - point).distanceSquared.compareTo(
+          (b.value - point).distanceSquared,
+        ),
+      );
+    final result = entries.take(3).map((entry) => entry.key).toList();
+    if (!result.contains(fallback)) result.add(fallback);
+    return result;
   }
 
   @override
@@ -329,6 +416,83 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
     final coverage = overlap / skeleton.length;
     final density = overlap / trace.length;
     return coverage * 0.82 + density * 0.18;
+  }
+
+  static double _geometrySimilarity(
+    List<Offset> trace,
+    List<Offset> template,
+  ) {
+    if (trace.length != template.length || trace.length < 2) return 0;
+    var locationDistance = 0.0;
+    for (var index = 0; index < trace.length; index++) {
+      locationDistance += (trace[index] - template[index]).distance;
+    }
+    locationDistance /= trace.length;
+
+    final traceShape = _normalizeShape(trace);
+    final templateShape = _normalizeShape(template);
+    var shapeDistance = 0.0;
+    for (var index = 0; index < traceShape.length; index++) {
+      shapeDistance += (traceShape[index] - templateShape[index]).distance;
+    }
+    shapeDistance /= traceShape.length;
+
+    final endpointDistance =
+        ((trace.first - template.first).distance +
+            (trace.last - template.last).distance) /
+        2;
+    final location = math.exp(-locationDistance * 7.5);
+    final shape = math.exp(-shapeDistance * 4.5);
+    final endpoints = math.exp(-endpointDistance * 10);
+    return location * .42 + shape * .43 + endpoints * .15;
+  }
+
+  static List<Offset> _normalizeShape(List<Offset> points) {
+    var minX = points.first.dx;
+    var maxX = minX;
+    var minY = points.first.dy;
+    var maxY = minY;
+    for (final point in points.skip(1)) {
+      minX = math.min(minX, point.dx);
+      maxX = math.max(maxX, point.dx);
+      minY = math.min(minY, point.dy);
+      maxY = math.max(maxY, point.dy);
+    }
+    final scale = math.max(math.max(maxX - minX, maxY - minY), .0001);
+    return points
+        .map(
+          (point) =>
+              Offset((point.dx - minX) / scale, (point.dy - minY) / scale),
+        )
+        .toList(growable: false);
+  }
+
+  static List<Offset> _resample(List<Offset> points, int count) {
+    if (points.isEmpty || count <= 0) return const [];
+    if (points.length == 1) return List.filled(count, points.first);
+    final distances = <double>[0];
+    for (var index = 1; index < points.length; index++) {
+      distances.add(
+        distances.last + (points[index] - points[index - 1]).distance,
+      );
+    }
+    final total = distances.last;
+    if (total <= .0001) return List.filled(count, points.first);
+    final result = <Offset>[];
+    var segment = 1;
+    for (var sample = 0; sample < count; sample++) {
+      final target = total * sample / (count - 1);
+      while (segment < distances.length - 1 && distances[segment] < target) {
+        segment++;
+      }
+      final startDistance = distances[segment - 1];
+      final segmentLength = distances[segment] - startDistance;
+      final t = segmentLength <= .0001
+          ? 0.0
+          : (target - startDistance) / segmentLength;
+      result.add(Offset.lerp(points[segment - 1], points[segment], t)!);
+    }
+    return result;
   }
 
   static int _editDistance(String a, String b) {

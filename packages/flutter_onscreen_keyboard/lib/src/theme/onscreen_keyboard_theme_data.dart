@@ -103,14 +103,22 @@ class OnscreenKeyboardThemeData {
       textKeyThemeData: TextKeyThemeData(
         backgroundColor: colors.surfaceContainerLowest,
         foregroundColor: colors.onSurface,
-        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
         padding: EdgeInsets.zero,
         fitChild: false,
         borderRadius: BorderRadius.circular(8),
-        iconSize: 21,
+        border: Border.all(color: colors.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow.withValues(alpha: .16),
+            offset: const Offset(0, 1),
+            blurRadius: 2,
+          ),
+        ],
+        iconSize: 23,
         textStyle: TextStyle(
           color: colors.onSurface,
-          fontSize: 22,
+          fontSize: 24,
           height: 1,
           fontWeight: FontWeight.w400,
         ),
@@ -124,7 +132,21 @@ class OnscreenKeyboardThemeData {
         padding: const EdgeInsets.symmetric(horizontal: 6),
         fitChild: false,
         borderRadius: BorderRadius.circular(8),
-        iconSize: 21,
+        border: Border.all(color: colors.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow.withValues(alpha: .14),
+            offset: const Offset(0, 1),
+            blurRadius: 2,
+          ),
+        ],
+        iconSize: 23,
+        textStyle: TextStyle(
+          color: colors.onSurface,
+          fontSize: 16,
+          height: 1,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }
@@ -318,6 +340,7 @@ class ActionKeyThemeData extends KeyThemeData {
     super.iconSize,
     super.boxShadow,
     super.gradient,
+    this.textStyle,
   });
 
   /// Background color of the key when pressed.
@@ -325,6 +348,9 @@ class ActionKeyThemeData extends KeyThemeData {
 
   /// Text or icon color of the key when pressed.
   final Color? pressedForegroundColor;
+
+  /// The text style used for action-key labels such as `?123` and `EN`.
+  final TextStyle? textStyle;
 
   /// Copies the current [ActionKeyThemeData] with the provided changes.
   ActionKeyThemeData copyWith({
@@ -340,6 +366,7 @@ class ActionKeyThemeData extends KeyThemeData {
     Gradient? gradient,
     Color? pressedBackgroundColor,
     Color? pressedForegroundColor,
+    TextStyle? textStyle,
   }) {
     return ActionKeyThemeData(
       backgroundColor: backgroundColor ?? this.backgroundColor,
@@ -356,6 +383,7 @@ class ActionKeyThemeData extends KeyThemeData {
           pressedBackgroundColor ?? this.pressedBackgroundColor,
       pressedForegroundColor:
           pressedForegroundColor ?? this.pressedForegroundColor,
+      textStyle: textStyle ?? this.textStyle,
     );
   }
 }
