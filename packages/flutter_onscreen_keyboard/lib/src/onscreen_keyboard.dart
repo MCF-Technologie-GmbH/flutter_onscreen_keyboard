@@ -546,9 +546,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   @override
   void switchLocale() => setLocale(
-    _locale.languageCode.toLowerCase() == 'de'
-        ? const Locale('en')
-        : const Locale('de'),
+    _locale.languageCode.toLowerCase() == 'en'
+        ? const Locale('de')
+        : const Locale('en'),
   );
 
   @override
