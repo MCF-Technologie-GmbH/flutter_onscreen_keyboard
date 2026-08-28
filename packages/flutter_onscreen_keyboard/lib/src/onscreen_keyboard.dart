@@ -41,10 +41,17 @@ class OnscreenKeyboard extends StatefulWidget {
     this.feedback = const OnscreenKeyboardFeedback(),
     this.suggestionBarBuilder,
     this.dockedHeight,
+    this.enabled = true,
   });
 
   /// The main application child widget.
   final Widget child;
+
+  /// Whether fields and controller calls may show this keyboard.
+  ///
+  /// Disabling an open keyboard closes and detaches it immediately. Defaults
+  /// to true for compatibility with earlier releases.
+  final bool enabled;
 
   /// The layout configuration for the keyboard.
   ///
@@ -154,6 +161,7 @@ class OnscreenKeyboard extends StatefulWidget {
     OnscreenKeyboardFeedback feedback = const OnscreenKeyboardFeedback(),
     SuggestionBarBuilder? suggestionBarBuilder,
     HeightGetter? dockedHeight,
+    bool enabled = true,
   }) => (context, child) {
     return OnscreenKeyboard(
       theme: theme,
@@ -171,6 +179,7 @@ class OnscreenKeyboard extends StatefulWidget {
       feedback: feedback,
       suggestionBarBuilder: suggestionBarBuilder,
       dockedHeight: dockedHeight,
+      enabled: enabled,
       child: child!,
     );
   };
@@ -228,6 +237,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   @override
   void didUpdateWidget(covariant OnscreenKeyboard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.enabled && !widget.enabled) {
+      close();
+    }
     if (widget.locale != oldWidget.locale && widget.locale != null) {
       _locale = widget.locale!;
     }
@@ -516,7 +528,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   bool get isVisible => _visible;
 
   @override
-  void open() => setState(() => _visible = true);
+  void open() {
+    if (!widget.enabled) return;
+    setState(() => _visible = true);
+  }
 
   @override
   void close() {

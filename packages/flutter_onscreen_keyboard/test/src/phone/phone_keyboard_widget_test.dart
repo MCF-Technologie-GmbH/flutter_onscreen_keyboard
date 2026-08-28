@@ -157,6 +157,45 @@ void main() {
     expect(controller.layout, isA<PhoneKeyboardLayout>());
   });
 
+  testWidgets(
+    'runtime disable closes the keyboard and blocks controller open',
+    (
+      tester,
+    ) async {
+      var enabled = true;
+      late StateSetter update;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              update = setState;
+              return OnscreenKeyboard(
+                enabled: enabled,
+                presentation: OnscreenKeyboardPresentation.docked,
+                child: const Scaffold(body: OnscreenKeyboardTextField()),
+              );
+            },
+          ),
+        ),
+      );
+      final controller = OnscreenKeyboard.of(
+        tester.element(find.byType(OnscreenKeyboardTextField)),
+      );
+
+      await tester.tap(find.byType(OnscreenKeyboardTextField));
+      await tester.pump();
+      expect(controller.isVisible, isTrue);
+
+      update(() => enabled = false);
+      await tester.pump();
+      expect(controller.isVisible, isFalse);
+
+      controller.open();
+      await tester.pump();
+      expect(controller.isVisible, isFalse);
+    },
+  );
+
   testWidgets('shift is one-shot and double tap enables caps lock', (
     tester,
   ) async {
