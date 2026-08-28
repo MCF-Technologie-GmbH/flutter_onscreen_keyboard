@@ -231,25 +231,24 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
   ) async {
     await _ensureLoaded(request.locale);
     request.cancellationToken.throwIfCancelled();
-    final trace = _collapseTrace(request.trace).join();
+    final trace = _collapseTrace(request.trace);
     if (trace.isEmpty) return const [];
     final language = request.locale.languageCode.toLowerCase();
     final learned = _learning[language]!;
     final candidates = <OnscreenKeyboardSuggestion>[];
     final source =
-        _swipeEdgeIndex[language]?['${trace.characters.first}\u0000${trace.characters.last}'] ??
+        _swipeEdgeIndex[language]?['${trace.first}\u0000${trace.last}'] ??
         const <OnscreenKeyboardLexiconEntry>[];
     for (final entry in source) {
       request.cancellationToken.throwIfCancelled();
       final word = entry.word.toLowerCase();
-      if (word.characters.first != trace.characters.first ||
-          word.characters.last != trace.characters.last) {
+      if (word.characters.first != trace.first ||
+          word.characters.last != trace.last) {
         continue;
       }
-      final skeleton = _collapseTrace(word.characters.toList()).join();
-      final distance = _editDistance(trace, skeleton);
-      final similarity = 1 - distance / math.max(trace.length, skeleton.length);
-      if (similarity < 0.25) continue;
+      final skeleton = _collapseTrace(word.characters.toList());
+      final similarity = _swipeSimilarity(trace, skeleton);
+      if (similarity < 0.3) continue;
       final learnedBoost = math.log(1 + (learned.words[word] ?? 0)) * 0.35;
       candidates.add(
         OnscreenKeyboardSuggestion(
@@ -306,6 +305,30 @@ class WeightedLexiconLanguageModel implements OnscreenKeyboardLanguageModel {
       if (result.isEmpty || result.last != value) result.add(value);
     }
     return result;
+  }
+
+  /// Scores a word skeleton against all keys crossed by a continuous trace.
+  ///
+  /// A geometric swipe naturally crosses incidental keys between the letters
+  /// the user intended. Ordered overlap therefore matters much more than raw
+  /// edit distance, while the smaller density term still rewards direct paths.
+  static double _swipeSimilarity(List<String> trace, List<String> skeleton) {
+    if (trace.isEmpty || skeleton.isEmpty) return 0;
+    final previous = List<int>.filled(trace.length + 1, 0);
+    for (var i = 0; i < skeleton.length; i++) {
+      var diagonal = previous[0];
+      for (var j = 0; j < trace.length; j++) {
+        final above = previous[j + 1];
+        previous[j + 1] = skeleton[i] == trace[j]
+            ? diagonal + 1
+            : math.max(previous[j], above);
+        diagonal = above;
+      }
+    }
+    final overlap = previous.last;
+    final coverage = overlap / skeleton.length;
+    final density = overlap / trace.length;
+    return coverage * 0.82 + density * 0.18;
   }
 
   static int _editDistance(String a, String b) {

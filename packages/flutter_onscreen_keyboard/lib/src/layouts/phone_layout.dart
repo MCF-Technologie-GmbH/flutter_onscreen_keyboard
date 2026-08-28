@@ -20,7 +20,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
   bool get _german => locale.languageCode.toLowerCase() == 'de';
 
   @override
-  double get aspectRatio => 1.72;
+  double get aspectRatio => 3.6;
 
   @override
   Map<String, KeyboardMode> get modes {
@@ -48,7 +48,17 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     final first = _german ? 'qwertzuiop' : 'qwertyuiop';
     final third = _german ? 'yxcvbnm' : 'zxcvbnm';
     return [
-      _row(first),
+      KeyboardRow(
+        keys: [
+          ...first.split('').map(_letter),
+          const OnscreenKeyboardKey.action(
+            name: ActionKeyType.backspace,
+            child: Icon(Icons.backspace_outlined),
+            flex: 26,
+            repeatable: true,
+          ),
+        ],
+      ),
       KeyboardRow(
         leading: const Expanded(flex: 10, child: SizedBox.shrink()),
         keys: 'asdfghjkl'.split('').map(_letter).toList(),
@@ -63,12 +73,6 @@ class PhoneKeyboardLayout extends KeyboardLayout {
             canHold: true,
           ),
           ...third.split('').map(_letter),
-          const OnscreenKeyboardKey.action(
-            name: ActionKeyType.backspace,
-            child: Icon(Icons.backspace_outlined),
-            flex: 28,
-            repeatable: true,
-          ),
         ],
       ),
       KeyboardRow(

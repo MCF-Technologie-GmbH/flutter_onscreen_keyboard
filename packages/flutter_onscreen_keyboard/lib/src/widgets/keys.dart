@@ -182,7 +182,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         ),
       ),
     };
-    if (theme.fitChild) child = FittedBox(child: child);
+    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
     return Semantics(
       button: true,
       label: widget.textKey.getText(secondary: widget.showSecondary),
@@ -315,7 +315,7 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
         child: Text(widget.actionKey.label ?? widget.actionKey.name),
       ),
     };
-    if (theme.fitChild) child = FittedBox(child: child);
+    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
     return Semantics(
       button: true,
       label: widget.actionKey.label ?? widget.actionKey.name,

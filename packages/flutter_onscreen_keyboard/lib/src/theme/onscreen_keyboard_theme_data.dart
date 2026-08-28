@@ -88,6 +88,47 @@ class OnscreenKeyboardThemeData {
 
   // predefined themes
 
+  /// Compact adaptive styling for a docked phone keyboard.
+  factory OnscreenKeyboardThemeData.phone(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return OnscreenKeyboardThemeData(
+      color: colors.surfaceContainer,
+      controlBarColor: colors.surfaceContainer,
+      padding: const EdgeInsets.fromLTRB(5, 2, 5, 8),
+      boxShadow: const [],
+      border: Border(
+        top: BorderSide(color: colors.outlineVariant),
+      ),
+      borderRadius: BorderRadius.zero,
+      textKeyThemeData: TextKeyThemeData(
+        backgroundColor: colors.surfaceContainerLowest,
+        foregroundColor: colors.onSurface,
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+        padding: EdgeInsets.zero,
+        fitChild: false,
+        borderRadius: BorderRadius.circular(8),
+        iconSize: 21,
+        textStyle: TextStyle(
+          color: colors.onSurface,
+          fontSize: 22,
+          height: 1,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+      actionKeyThemeData: ActionKeyThemeData(
+        backgroundColor: colors.surfaceContainerHighest,
+        foregroundColor: colors.onSurface,
+        pressedBackgroundColor: colors.primary,
+        pressedForegroundColor: colors.onPrimary,
+        margin: const EdgeInsets.symmetric(horizontal: 3, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        fitChild: false,
+        borderRadius: BorderRadius.circular(8),
+        iconSize: 21,
+      ),
+    );
+  }
+
   /// Google Gboard theme.
   factory OnscreenKeyboardThemeData.gBoard({Color? primary}) {
     final color = primary ?? Colors.blue;

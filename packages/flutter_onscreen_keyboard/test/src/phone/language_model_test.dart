@@ -26,14 +26,30 @@ void main() {
     expect(result.first.confidence, greaterThan(.8));
   });
 
-  test('decodes a collapsed swipe trace with first/last agreement', () async {
+  test('decodes a geometric trace that crosses incidental keys', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {'en': entries},
     );
     final result = await model.decodeSwipe(
       OnscreenKeyboardSwipeRequest(
         locale: const Locale('en'),
-        trace: const ['h', 'e', 'l', 'l', 'o'],
+        trace: const [
+          'h',
+          'y',
+          't',
+          'r',
+          'e',
+          'r',
+          't',
+          'y',
+          'u',
+          'i',
+          'o',
+          'k',
+          'l',
+          'k',
+          'o',
+        ],
         cancellationToken: OnscreenKeyboardCancellationToken(),
       ),
     );

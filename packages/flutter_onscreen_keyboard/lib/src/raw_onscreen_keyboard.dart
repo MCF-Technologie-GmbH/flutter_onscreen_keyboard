@@ -1,5 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
 import 'package:flutter_onscreen_keyboard/src/widgets/keys.dart';
@@ -16,6 +18,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
     this.showSecondary = false,
     this.onAlternate,
     this.onSwipe,
+    this.onSwipeUpdate,
     this.feedback = const OnscreenKeyboardFeedback(),
   });
 
@@ -28,6 +31,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
   final String mode;
   final ValueChanged<String>? onAlternate;
   final ValueChanged<List<String>>? onSwipe;
+  final ValueChanged<List<String>>? onSwipeUpdate;
   final OnscreenKeyboardFeedback feedback;
 
   @override
@@ -40,13 +44,18 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   int? _pointer;
   Offset? _origin;
   bool _swiping = false;
+  Timer? _swipePreviewTimer;
 
   void _pointerDown(PointerDownEvent event) {
+    if (_pointer != null || widget.onSwipe == null) return;
+    final key = _hit(event.position);
+    if (key == null) return;
     _pointer = event.pointer;
     _origin = event.position;
-    _trace.clear();
-    final key = _hit(event.position);
-    if (key != null) _trace.add(key.primary);
+    _swiping = false;
+    _trace
+      ..clear()
+      ..add(key.primary);
   }
 
   void _pointerMove(PointerMoveEvent event) {
@@ -58,11 +67,22 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     final key = _hit(event.position);
     if (key != null && (_trace.isEmpty || _trace.last != key.primary)) {
       _trace.add(key.primary);
+      _scheduleSwipePreview();
     }
+  }
+
+  void _scheduleSwipePreview() {
+    if (_trace.length < 2 || widget.onSwipeUpdate == null) return;
+    _swipePreviewTimer?.cancel();
+    _swipePreviewTimer = Timer(const Duration(milliseconds: 32), () {
+      if (!mounted || !_swiping || _pointer == null) return;
+      widget.onSwipeUpdate?.call(List.unmodifiable(_trace));
+    });
   }
 
   void _pointerUp(PointerUpEvent event) {
     if (_pointer != event.pointer) return;
+    _swipePreviewTimer?.cancel();
     if (_swiping && _trace.length >= 2) {
       widget.onSwipe?.call(List.unmodifiable(_trace));
     }
@@ -94,6 +114,7 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
       onPointerMove: _pointerMove,
       onPointerUp: _pointerUp,
       onPointerCancel: (_) {
+        _swipePreviewTimer?.cancel();
         _pointer = null;
         _origin = null;
         _trace.clear();
@@ -137,6 +158,12 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _swipePreviewTimer?.cancel();
+    super.dispose();
   }
 
   Widget _textKey(TextKey key) {

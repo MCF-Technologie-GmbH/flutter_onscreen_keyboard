@@ -250,20 +250,41 @@ void main() {
     tester,
   ) async {
     final controller = TextEditingController();
+    final languageModel = _TrackingLanguageModel();
     await _pumpKeyboard(
       tester,
       controller: controller,
-      languageModel: const _StaticLanguageModel(),
+      languageModel: languageModel,
       typingMode: OnscreenKeyboardTypingMode.suggestions,
     );
-    final start = tester.getCenter(find.text('q'));
-    final end = tester.getCenter(find.text('e'));
-    final gesture = await tester.startGesture(start);
-    await gesture.moveTo(end);
+    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
+    await gesture.moveTo(tester.getCenter(find.text('e')));
+    await gesture.moveTo(tester.getCenter(find.text('l')));
+    await gesture.moveTo(tester.getCenter(find.text('o')));
+    await tester.pump(const Duration(milliseconds: 33));
+
+    expect(languageModel.decodeCount, 1);
+    expect(controller.text, isEmpty);
+
     await gesture.up();
     await tester.pump();
 
     expect(controller.text, 'hello');
+    expect(languageModel.lastTrace, ['h', 'e', 'l', 'o']);
+  });
+
+  testWidgets('phone keys stay compact and backspace is in the top row', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+
+    final q = tester.widget<Text>(find.text('q'));
+    expect(q.style?.fontSize, 22);
+    expect(
+      tester.getCenter(find.byIcon(Icons.backspace_outlined)).dy,
+      lessThan(tester.getCenter(find.byIcon(Icons.arrow_upward_rounded)).dy),
+    );
   });
 
   testWidgets('autocorrect applies at a boundary and backspace undoes it', (
@@ -334,4 +355,18 @@ class _StaticLanguageModel implements OnscreenKeyboardLanguageModel {
     OnscreenKeyboardSuggestion(word: 'hello', score: 10, confidence: .99),
     OnscreenKeyboardSuggestion(word: 'help', score: 8, confidence: .8),
   ];
+}
+
+class _TrackingLanguageModel extends _StaticLanguageModel {
+  int decodeCount = 0;
+  List<String> lastTrace = const [];
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> decodeSwipe(
+    OnscreenKeyboardSwipeRequest request,
+  ) async {
+    decodeCount++;
+    lastTrace = request.trace;
+    return super.decodeSwipe(request);
+  }
 }

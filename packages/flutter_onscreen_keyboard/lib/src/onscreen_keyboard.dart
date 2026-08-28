@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle;
 
 import 'package:flutter/cupertino.dart';
@@ -730,7 +731,16 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
   }
 
-  Future<void> _handleSwipe(List<String> trace) async {
+  Future<void> _previewSwipe(List<String> trace) =>
+      _decodeSwipe(trace, commit: false);
+
+  Future<void> _handleSwipe(List<String> trace) =>
+      _decodeSwipe(trace, commit: true);
+
+  Future<void> _decodeSwipe(
+    List<String> trace, {
+    required bool commit,
+  }) async {
     final model = widget.languageModel;
     final field = activeTextField;
     if (model == null ||
@@ -754,7 +764,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       );
       if (!mounted || token.isCancelled || token != _requestToken) return;
       if (result.isNotEmpty) {
-        _insertText(result.first.word, replaceCurrentWord: true);
+        if (commit) {
+          _insertText(result.first.word, replaceCurrentWord: true);
+        }
         setState(() => _suggestions = result);
       }
     } on OnscreenKeyboardRequestCancelled {
@@ -820,7 +832,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       return builder(context, _suggestions, _acceptSuggestion, undo);
     }
     return SizedBox(
-      height: 48,
+      height: 44,
       child: Row(
         children: [
           if (undo != null)
@@ -837,6 +849,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                   suggestion.word,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15),
                 ),
               ),
             ),
@@ -860,13 +873,13 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final media = MediaQuery.of(context);
     final reducedMotion = media.disableAnimations;
     final keyboardVisible = widget.enabled && _visible;
-    final maximumHeight = media.size.height * .52;
-    final minimumHeight = maximumHeight < 220 ? maximumHeight : 220.0;
-    final targetHeight =
-        widget.dockedHeight?.call(context) ??
+    final maximumHeight = math.min(media.size.height * .52, 360).toDouble();
+    final minimumHeight = maximumHeight < 240 ? maximumHeight : 240.0;
+    final calculatedHeight =
         (media.size.width / resolvedLayout.aspectRatio +
-                (widget.showControlBar ? 48 : 0))
+                (widget.showControlBar ? 44 : 0))
             .clamp(minimumHeight, maximumHeight);
+    final targetHeight = widget.dockedHeight?.call(context) ?? calculatedHeight;
     return TweenAnimationBuilder<double>(
       duration: reducedMotion
           ? Duration.zero
@@ -908,31 +921,40 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     KeyboardLayout resolvedLayout,
   ) {
     final theme = context.theme;
-    return TextFieldTapRegion(
-      child: ColoredBox(
-        color: theme.color ?? Theme.of(context).colorScheme.surfaceContainer,
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: theme.padding ?? EdgeInsets.zero,
-            child: Column(
-              children: [
-                if (widget.showControlBar) _buildSuggestionBar(context),
-                Expanded(
-                  child: RawOnscreenKeyboard(
-                    aspectRatio: widget.aspectRatio,
-                    onKeyDown: _onKeyDown,
-                    onKeyUp: _onKeyUp,
-                    onAlternate: _insertText,
-                    onSwipe: _handleSwipe,
-                    feedback: widget.feedback,
-                    layout: resolvedLayout,
-                    mode: _mode,
-                    pressedActionKeys: _pressedActionKeys,
-                    showSecondary: _showSecondary,
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: TextFieldTapRegion(
+        child: ColoredBox(
+          color: theme.color ?? Theme.of(context).colorScheme.surfaceContainer,
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: theme.padding ?? EdgeInsets.zero,
+              child: Column(
+                children: [
+                  if (widget.showControlBar) _buildSuggestionBar(context),
+                  Expanded(
+                    child: RawOnscreenKeyboard(
+                      aspectRatio: widget.aspectRatio,
+                      onKeyDown: _onKeyDown,
+                      onKeyUp: _onKeyUp,
+                      onAlternate: _insertText,
+                      onSwipe: _typingMode == OnscreenKeyboardTypingMode.off
+                          ? null
+                          : _handleSwipe,
+                      onSwipeUpdate:
+                          _typingMode == OnscreenKeyboardTypingMode.off
+                          ? null
+                          : _previewSwipe,
+                      feedback: widget.feedback,
+                      layout: resolvedLayout,
+                      mode: _mode,
+                      pressedActionKeys: _pressedActionKeys,
+                      showSecondary: _showSecondary,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -960,6 +982,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   @override
   Widget build(BuildContext context) {
     final resolvedLayout = _resolveLayout();
+    final resolvedTheme =
+        widget.theme ??
+        (widget.presentation == OnscreenKeyboardPresentation.docked
+            ? OnscreenKeyboardThemeData.phone(context)
+            : const OnscreenKeyboardThemeData());
     if (!resolvedLayout.modes.containsKey(_mode)) {
       _mode = resolvedLayout.modes.keys.first;
     }
@@ -971,7 +998,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     return _OnscreenKeyboardProvider(
       state: this,
       child: OnscreenKeyboardTheme(
-        data: widget.theme ?? const OnscreenKeyboardThemeData(),
+        data: resolvedTheme,
         child: widget.presentation == OnscreenKeyboardPresentation.docked
             ? _RetargetableOverlay(
                 child: _buildDocked(context, resolvedLayout),
