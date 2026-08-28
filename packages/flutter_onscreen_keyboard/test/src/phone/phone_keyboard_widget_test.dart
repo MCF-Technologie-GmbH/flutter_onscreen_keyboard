@@ -29,6 +29,20 @@ void main() {
     expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
   });
 
+  testWidgets('docked keyboard remains valid in a short landscape viewport', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(640, 320);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+
+    expect(tester.takeException(), isNull);
+    expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
+  });
+
   testWidgets('shift is one-shot and double tap enables caps lock', (
     tester,
   ) async {

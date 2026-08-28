@@ -834,11 +834,13 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   Widget _buildDocked(BuildContext context, KeyboardLayout resolvedLayout) {
     final media = MediaQuery.of(context);
     final reducedMotion = media.disableAnimations;
+    final maximumHeight = media.size.height * .52;
+    final minimumHeight = maximumHeight < 220 ? maximumHeight : 220.0;
     final targetHeight =
         widget.dockedHeight?.call(context) ??
         (media.size.width / resolvedLayout.aspectRatio +
                 (widget.showControlBar ? 48 : 0))
-            .clamp(220.0, media.size.height * .52);
+            .clamp(minimumHeight, maximumHeight);
     return TweenAnimationBuilder<double>(
       duration: reducedMotion
           ? Duration.zero
