@@ -28,6 +28,23 @@ void main() {
     expect(result[1].confidence, greaterThan(.8));
   });
 
+  test('accepts a lexicon prepared off the UI isolate', () async {
+    final model = WeightedLexiconLanguageModel.prepared(
+      lexicons: {
+        'en': OnscreenKeyboardPreparedLexicon.prepare(entries),
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: 'wor',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'world');
+  });
+
   test('decodes a geometric trace that crosses incidental keys', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {'en': entries},

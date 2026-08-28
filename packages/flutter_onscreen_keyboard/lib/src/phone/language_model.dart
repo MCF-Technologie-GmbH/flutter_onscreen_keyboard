@@ -223,6 +223,49 @@ class OnscreenKeyboardLexiconEntry {
   final double weight;
 }
 
+/// Pre-indexed lexicon data that can be prepared on a background isolate.
+@immutable
+class OnscreenKeyboardPreparedLexicon {
+  const OnscreenKeyboardPreparedLexicon._({
+    required this.entries,
+    required this.prefixIndex,
+    required this.swipeEdgeIndex,
+    required this.wordIndex,
+  });
+
+  factory OnscreenKeyboardPreparedLexicon.prepare(
+    Iterable<OnscreenKeyboardLexiconEntry> source,
+  ) {
+    final entries = List<OnscreenKeyboardLexiconEntry>.unmodifiable(source);
+    final prefixes = <String, List<OnscreenKeyboardLexiconEntry>>{};
+    final swipeEdges = <String, List<OnscreenKeyboardLexiconEntry>>{};
+    final words = <String, OnscreenKeyboardLexiconEntry>{};
+    for (final entry in entries) {
+      final normalized = entry.word.toLowerCase();
+      words[normalized] = entry;
+      for (var length = 1; length <= math.min(4, normalized.length); length++) {
+        final prefix = normalized.substring(0, length);
+        prefixes.putIfAbsent(prefix, () => []).add(entry);
+      }
+      final edges =
+          '${normalized.characters.first}\u0000'
+          '${normalized.characters.last}';
+      swipeEdges.putIfAbsent(edges, () => []).add(entry);
+    }
+    return OnscreenKeyboardPreparedLexicon._(
+      entries: entries,
+      prefixIndex: prefixes,
+      swipeEdgeIndex: swipeEdges,
+      wordIndex: words,
+    );
+  }
+
+  final List<OnscreenKeyboardLexiconEntry> entries;
+  final Map<String, List<OnscreenKeyboardLexiconEntry>> prefixIndex;
+  final Map<String, List<OnscreenKeyboardLexiconEntry>> swipeEdgeIndex;
+  final Map<String, OnscreenKeyboardLexiconEntry> wordIndex;
+}
+
 /// Dependency-free weighted lexicon suitable for deterministic offline use.
 class WeightedLexiconLanguageModel
     implements
@@ -237,31 +280,39 @@ class WeightedLexiconLanguageModel
     this.maximumLearnedTrigrams = 6000,
     this.maximumBlockedWords = 500,
   }) {
-    _lexicons = {
+    _installPrepared({
       for (final entry in lexicons.entries)
-        entry.key.toLowerCase(): List.unmodifiable(entry.value),
+        entry.key.toLowerCase(): OnscreenKeyboardPreparedLexicon.prepare(
+          entry.value,
+        ),
+    });
+  }
+
+  /// Creates a model from lexicons indexed on a background isolate.
+  WeightedLexiconLanguageModel.prepared({
+    required Map<String, OnscreenKeyboardPreparedLexicon> lexicons,
+    this.learningStore,
+    this.maximumLearnedWords = 2000,
+    this.maximumLearnedBigrams = 4000,
+    this.maximumLearnedTrigrams = 6000,
+    this.maximumBlockedWords = 500,
+  }) {
+    _installPrepared({
+      for (final entry in lexicons.entries)
+        entry.key.toLowerCase(): entry.value,
+    });
+  }
+
+  void _installPrepared(
+    Map<String, OnscreenKeyboardPreparedLexicon> prepared,
+  ) {
+    _lexicons = {
+      for (final entry in prepared.entries) entry.key: entry.value.entries,
     };
-    for (final language in _lexicons.entries) {
-      final prefixes = <String, List<OnscreenKeyboardLexiconEntry>>{};
-      final swipeEdges = <String, List<OnscreenKeyboardLexiconEntry>>{};
-      for (final entry in language.value) {
-        final normalized = entry.word.toLowerCase();
-        _wordIndex.putIfAbsent(language.key, () => {})[normalized] = entry;
-        for (
-          var length = 1;
-          length <= math.min(4, normalized.length);
-          length++
-        ) {
-          final prefix = normalized.substring(0, length);
-          prefixes.putIfAbsent(prefix, () => []).add(entry);
-        }
-        final edges =
-            '${normalized.characters.first}\u0000'
-            '${normalized.characters.last}';
-        swipeEdges.putIfAbsent(edges, () => []).add(entry);
-      }
-      _prefixIndex[language.key] = prefixes;
-      _swipeEdgeIndex[language.key] = swipeEdges;
+    for (final entry in prepared.entries) {
+      _prefixIndex[entry.key] = entry.value.prefixIndex;
+      _swipeEdgeIndex[entry.key] = entry.value.swipeEdgeIndex;
+      _wordIndex[entry.key] = entry.value.wordIndex;
     }
   }
 
