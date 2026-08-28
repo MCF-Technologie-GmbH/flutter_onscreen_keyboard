@@ -19,4 +19,10 @@ abstract class ActionKeyType {
 
   /// Identifier for the Shift key.
   static const shift = 'shift';
+
+  /// Identifier for switching between supported languages.
+  static const language = 'language';
+
+  /// Identifier for switching between alphabetic and symbol layouts.
+  static const modeSwitch = 'mode_switch';
 }

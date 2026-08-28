@@ -2,6 +2,24 @@
 
 A customizable and extensible on-screen virtual keyboard for Flutter applications. Ideal for desktop and touchscreen environments where physical keyboards are unavailable or limited.
 
+The MCF fork also provides an opt-in, offline phone keyboard while preserving
+the upstream floating keyboard as the default:
+
+```dart
+OnscreenKeyboard(
+  presentation: OnscreenKeyboardPresentation.docked,
+  typingMode: OnscreenKeyboardTypingMode.suggestions,
+  locale: const Locale('de'),
+  languageModel: model,
+  child: const App(),
+)
+```
+
+`PhoneKeyboardLayout` derives text, multiline, numeric, signed-decimal, phone,
+email, and URL behavior from `OnscreenKeyboardFieldConfiguration`. Language
+models and learning persistence are injectable; the package itself has no
+network, corpus, or persistence dependency.
+
 [![deploy](https://github.com/albinpk/flutter_onscreen_keyboard/actions/workflows/publish.yml/badge.svg)](https://github.com/albinpk/flutter_onscreen_keyboard/actions/workflows/publish.yml)
 [![codecov](https://codecov.io/gh/albinpk/flutter_onscreen_keyboard/graph/badge.svg?token=01VDBVBIR9)](https://codecov.io/gh/albinpk/flutter_onscreen_keyboard)
 [![Pub Version](https://img.shields.io/pub/v/flutter_onscreen_keyboard.svg)](https://pub.dev/packages/flutter_onscreen_keyboard)

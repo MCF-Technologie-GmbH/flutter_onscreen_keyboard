@@ -36,6 +36,7 @@ class OnscreenKeyboardTextFormField extends StatefulWidget {
     this.formFieldKey,
     this.enableOnscreenKeyboard = true,
     this.onscreenKeyboardMode,
+    this.onscreenKeyboardLearningEnabled = true,
     this.groupId = EditableText,
     this.controller,
     this.initialValue,
@@ -150,6 +151,9 @@ class OnscreenKeyboardTextFormField extends StatefulWidget {
   /// If none is specified the keyboard will use the first mode
   /// specified on the layout mode list.
   final String? onscreenKeyboardMode;
+
+  /// Whether accepted words from this field may be learned locally.
+  final bool onscreenKeyboardLearningEnabled;
 
   /// {@macro flutter.widgets.editableText.groupId}
   final Object groupId;
@@ -764,12 +768,12 @@ class _OnscreenKeyboardTextFormFieldState
   void _onFocusChanged() {
     if (!widget.enableOnscreenKeyboard) return;
     if (_effectiveFocusNode.hasPrimaryFocus) {
+      _keyboard.attachTextField(this);
       final mode =
           widget.onscreenKeyboardMode ??
           _keyboard.layout.modes.entries.first.key;
 
       _keyboard
-        ..attachTextField(this)
         ..setModeNamed(mode)
         ..open();
     } else {
@@ -791,6 +795,26 @@ class _OnscreenKeyboardTextFormFieldState
 
   @override
   ValueChanged<String>? get onChanged => widget.onChanged;
+
+  @override
+  OnscreenKeyboardFieldConfiguration get fieldConfiguration =>
+      OnscreenKeyboardFieldConfiguration.fromFlutter(
+        keyboardType: widget.keyboardType,
+        inputAction: widget.textInputAction,
+        maxLines: widget.maxLines,
+        obscureText: widget.obscureText,
+        readOnly: widget.readOnly,
+        enableSuggestions: widget.enableSuggestions,
+        autocorrect: widget.autocorrect,
+        learningEnabled: widget.onscreenKeyboardLearningEnabled,
+        inputFormatters: widget.inputFormatters,
+      );
+
+  @override
+  ValueChanged<String>? get onSubmitted => widget.onFieldSubmitted;
+
+  @override
+  VoidCallback? get onEditingComplete => widget.onEditingComplete;
 
   @override
   Widget build(BuildContext context) {

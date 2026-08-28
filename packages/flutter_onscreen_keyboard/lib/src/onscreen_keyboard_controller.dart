@@ -12,8 +12,32 @@ abstract interface class OnscreenKeyboardController {
   /// Closes the onscreen keyboard.
   void close();
 
+  /// Hides the keyboard without detaching the focused field.
+  void hide();
+
+  /// Whether the keyboard is currently visible.
+  bool get isVisible;
+
   /// The current layout of the onscreen keyboard.
   KeyboardLayout get layout;
+
+  /// Current language used by layouts and language assistance.
+  Locale get locale;
+
+  /// Current language-assistance mode.
+  OnscreenKeyboardTypingMode get typingMode;
+
+  /// Updates the active locale and re-resolves the layout.
+  void setLocale(Locale locale);
+
+  /// Switches between configured English and German locales.
+  void switchLocale();
+
+  /// Updates language-assistance behavior at runtime.
+  void setTypingMode(OnscreenKeyboardTypingMode mode);
+
+  /// Restores the text immediately preceding the latest automatic correction.
+  bool undoLastCorrection();
 
   /// Sets the alignment of the onscreen keyboard.
   ///
