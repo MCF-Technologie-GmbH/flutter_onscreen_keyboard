@@ -102,6 +102,28 @@ void main() {
     expect(_keyPreview, findsNothing);
   });
 
+  testWidgets('autocorrect commits at a boundary and Backspace rejects it', (
+    tester,
+  ) async {
+    await _startPlayground(tester);
+    final field = find.byKey(const ValueKey('typing-and-return-field'));
+    OnscreenKeyboard.of(
+      tester.element(field),
+    ).setTypingMode(OnscreenKeyboardTypingMode.autocorrect);
+    for (final letter in 'helo'.characters) {
+      await tester.tap(_key(letter));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.pump();
+    expect(_textOf(tester, field), 'hello ');
+
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
+    expect(_textOf(tester, field), 'helo');
+  });
+
   testWidgets('Shift Caps Lock and Return work through the rendered keyboard', (
     tester,
   ) async {

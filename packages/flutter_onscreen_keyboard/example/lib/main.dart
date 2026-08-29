@@ -45,9 +45,12 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
   static Iterable<OnscreenKeyboardLexiconEntry> _entries(String words) sync* {
     final values = words.split(' ');
     for (var index = 0; index < values.length; index++) {
+      final word = values[index];
       yield OnscreenKeyboardLexiconEntry(
-        values[index],
-        (values.length - index) / values.length,
+        word,
+        word == 'hello' || word == 'hallo'
+            ? 10
+            : (values.length - index) / values.length,
       );
     }
   }
