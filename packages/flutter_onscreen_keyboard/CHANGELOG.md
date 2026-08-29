@@ -11,6 +11,8 @@
 - Raise automatic replacement to calibrated high-confidence and
   language-specific score-margin gates; immediate Backspace records rejection
   and accepted corrections are learned only after continued input.
+- Prefer deterministic missing-key, repeat-key, and transposition evidence over
+  unrelated frequency-only correction candidates.
 
 ## 0.5.0-mcf.1
 

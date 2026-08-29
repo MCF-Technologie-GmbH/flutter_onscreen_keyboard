@@ -789,6 +789,7 @@ class WeightedLexiconLanguageModel
       final rejection = learned.correctionOutcomes['$prefix\u0000$word'] ?? 0;
       final correctionPenalty = rejection < 0 ? -math.log(1 - rejection) : 0;
       final correctionAcceptance = rejection > 0 ? math.log(1 + rejection) : 0;
+      final errorPatternBoost = _deterministicErrorPatternBoost(prefix, word);
       final score = begins || prefix.isEmpty
           ? entry.weight +
                 (begins ? 1.2 : 0) +
@@ -804,6 +805,7 @@ class WeightedLexiconLanguageModel
                 lengthPenalty +
                 firstAgreement +
                 lastAgreement +
+                errorPatternBoost +
                 learnedBoost +
                 contextBoost * 1.35 -
                 correctionPenalty +
@@ -820,7 +822,8 @@ class WeightedLexiconLanguageModel
                               .0025 -
                           editCost * .0025 +
                           (firstAgreement > 0 ? .001 : 0) +
-                          (lastAgreement > 0 ? .001 : 0) -
+                          (lastAgreement > 0 ? .001 : 0) +
+                          (errorPatternBoost > 0 ? .002 : 0) -
                           correctionPenalty * .02 +
                           correctionAcceptance * .002 +
                           contextBoost.clamp(0, 1) * .003))
@@ -1161,6 +1164,78 @@ class WeightedLexiconLanguageModel
     <= 7 => 1.55,
     _ => 2.05,
   };
+
+  /// Rewards deterministic physical-key error shapes before word frequency.
+  ///
+  /// A missing character is substantially more likely than an unrelated rare
+  /// word that happens to be one edit away. Repeated keys and adjacent
+  /// transpositions are similarly strong, but less ambiguous, signals. These
+  /// bonuses are deliberately structural: they do not depend on user data and
+  /// cannot make an exact dictionary word eligible for replacement.
+  static double _deterministicErrorPatternBoost(
+    String typed,
+    String candidate,
+  ) {
+    final source = typed.characters.toList(growable: false);
+    final target = candidate.characters.toList(growable: false);
+    if (_isSingleInsertion(source, target)) return 3.8;
+    if (_isRepeatedCharacterRemoval(source, target)) return 1.2;
+    if (_isAdjacentTransposition(source, target)) return .8;
+    return 0;
+  }
+
+  static bool _isSingleInsertion(List<String> source, List<String> target) {
+    if (target.length != source.length + 1) return false;
+    var sourceIndex = 0;
+    var skipped = false;
+    for (final character in target) {
+      if (sourceIndex < source.length && character == source[sourceIndex]) {
+        sourceIndex++;
+      } else if (!skipped) {
+        skipped = true;
+      } else {
+        return false;
+      }
+    }
+    return sourceIndex == source.length;
+  }
+
+  static bool _isRepeatedCharacterRemoval(
+    List<String> source,
+    List<String> target,
+  ) {
+    if (source.length != target.length + 1) return false;
+    for (var index = 1; index < source.length; index++) {
+      if (source[index] != source[index - 1]) continue;
+      final withoutRepeat = [...source]..removeAt(index);
+      if (_sameCharacters(withoutRepeat, target)) return true;
+    }
+    return false;
+  }
+
+  static bool _isAdjacentTransposition(
+    List<String> source,
+    List<String> target,
+  ) {
+    if (source.length != target.length) return false;
+    final differences = <int>[];
+    for (var index = 0; index < source.length; index++) {
+      if (source[index] != target[index]) differences.add(index);
+      if (differences.length > 2) return false;
+    }
+    return differences.length == 2 &&
+        differences[1] == differences[0] + 1 &&
+        source[differences[0]] == target[differences[1]] &&
+        source[differences[1]] == target[differences[0]];
+  }
+
+  static bool _sameCharacters(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var index = 0; index < left.length; index++) {
+      if (left[index] != right[index]) return false;
+    }
+    return true;
+  }
 
   static double _weightedWordDistance(
     String typed,

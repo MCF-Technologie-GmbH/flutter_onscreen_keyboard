@@ -108,6 +108,27 @@ void main() {
     expect(result[1].word, 'cat');
   });
 
+  test('missing-key evidence outranks an unrelated frequent edit', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('deena', 10),
+          OnscreenKeyboardLexiconEntry('depend', 8),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: 'deend',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'depend');
+    expect(result[1].confidence, greaterThanOrEqualTo(.985));
+  });
+
   test('marks exact words and German compounds as valid input', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {
