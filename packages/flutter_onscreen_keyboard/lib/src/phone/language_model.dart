@@ -798,6 +798,7 @@ class WeightedLexiconLanguageModel
                 correctionPenalty +
                 correctionAcceptance * .28
           : entry.weight * .42 +
+                2.5 +
                 similarity * 1.4 -
                 editCost * 2.45 -
                 lengthPenalty +
