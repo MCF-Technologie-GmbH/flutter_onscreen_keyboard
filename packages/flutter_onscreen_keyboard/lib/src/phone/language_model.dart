@@ -494,15 +494,10 @@ final class _CompactLexiconTrie {
       if (next < 0) return const [];
       node = next;
     }
-    final frontier = <int>[node];
+    final frontier = _TrieNodeQueue(this, entries)..add(node);
     final result = <int>[];
     while (frontier.isNotEmpty && result.length < limit) {
-      frontier.sort(
-        (a, b) => entries[bestEntries[b]].weight.compareTo(
-          entries[bestEntries[a]].weight,
-        ),
-      );
-      final current = frontier.removeAt(0);
+      final current = frontier.removeHighest();
       final terminal = terminalEntries[current];
       if (terminal >= 0) result.add(terminal);
       for (
@@ -514,6 +509,61 @@ final class _CompactLexiconTrie {
       }
     }
     return result;
+  }
+}
+
+final class _TrieNodeQueue {
+  _TrieNodeQueue(this.trie, this.entries);
+
+  final _CompactLexiconTrie trie;
+  final List<OnscreenKeyboardLexiconEntry> entries;
+  final List<int> _nodes = [];
+
+  bool get isNotEmpty => _nodes.isNotEmpty;
+
+  void add(int node) {
+    _nodes.add(node);
+    var index = _nodes.length - 1;
+    while (index > 0) {
+      final parent = (index - 1) ~/ 2;
+      if (!_higher(_nodes[index], _nodes[parent])) break;
+      final value = _nodes[index];
+      _nodes[index] = _nodes[parent];
+      _nodes[parent] = value;
+      index = parent;
+    }
+  }
+
+  int removeHighest() {
+    final result = _nodes.first;
+    final last = _nodes.removeLast();
+    if (_nodes.isEmpty) return result;
+    _nodes[0] = last;
+    var index = 0;
+    while (true) {
+      final left = index * 2 + 1;
+      if (left >= _nodes.length) break;
+      final right = left + 1;
+      var child = left;
+      if (right < _nodes.length && _higher(_nodes[right], _nodes[left])) {
+        child = right;
+      }
+      if (!_higher(_nodes[child], _nodes[index])) break;
+      final value = _nodes[index];
+      _nodes[index] = _nodes[child];
+      _nodes[child] = value;
+      index = child;
+    }
+    return result;
+  }
+
+  bool _higher(int left, int right) {
+    final leftEntry = trie.bestEntries[left];
+    final rightEntry = trie.bestEntries[right];
+    final byWeight = entries[leftEntry].weight.compareTo(
+      entries[rightEntry].weight,
+    );
+    return byWeight != 0 ? byWeight > 0 : left < right;
   }
 }
 
