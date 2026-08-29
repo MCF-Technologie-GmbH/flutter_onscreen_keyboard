@@ -3,7 +3,7 @@ description: >
   A customizable and extensible virtual keyboard widget
   for Flutter desktop and touchscreen apps.
 
-version: 0.5.0-mcf.1
+version: 0.6.0-mcf.1
 
 resolution: workspace
 

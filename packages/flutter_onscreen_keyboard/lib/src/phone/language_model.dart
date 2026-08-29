@@ -1,6 +1,7 @@
 // ignore_for_file: public_member_api_docs
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
@@ -20,12 +21,16 @@ class OnscreenKeyboardSuggestion {
     required this.score,
     this.confidence = 0,
     this.kind = OnscreenKeyboardSuggestionKind.completion,
+    this.exactMatch = false,
   });
 
   final String word;
   final double score;
   final double confidence;
   final OnscreenKeyboardSuggestionKind kind;
+
+  /// Whether the typed token is already valid in the active lexicon.
+  final bool exactMatch;
 }
 
 @immutable
@@ -79,6 +84,22 @@ class OnscreenKeyboardCancellationToken {
   }
 }
 
+/// One normalized touch sample associated with a typed character.
+@immutable
+class OnscreenKeyboardTapSample {
+  const OnscreenKeyboardTapSample({
+    required this.character,
+    required this.position,
+    required this.keyCenter,
+    required this.timestamp,
+  });
+
+  final String character;
+  final Offset position;
+  final Offset keyCenter;
+  final Duration timestamp;
+}
+
 class OnscreenKeyboardRequestCancelled implements Exception {
   const OnscreenKeyboardRequestCancelled();
 }
@@ -92,6 +113,8 @@ class OnscreenKeyboardSuggestionRequest {
     this.previousWord,
     this.previousPreviousWord,
     this.limit = 3,
+    this.tapSamples = const [],
+    this.keyCenters = const {},
   });
 
   final Locale locale;
@@ -100,6 +123,8 @@ class OnscreenKeyboardSuggestionRequest {
   final String? previousPreviousWord;
   final int limit;
   final OnscreenKeyboardCancellationToken cancellationToken;
+  final List<OnscreenKeyboardTapSample> tapSamples;
+  final Map<String, Offset> keyCenters;
 }
 
 @immutable
@@ -149,13 +174,9 @@ class OnscreenKeyboardSwipeData {
 }
 
 /// Pluggable, offline language assistance.
-abstract interface class OnscreenKeyboardLanguageModel {
+abstract interface class OnscreenKeyboardSuggestionModel {
   Future<List<OnscreenKeyboardSuggestion>> suggestions(
     OnscreenKeyboardSuggestionRequest request,
-  );
-
-  Future<List<OnscreenKeyboardSuggestion>> decodeSwipe(
-    OnscreenKeyboardSwipeRequest request,
   );
 
   Future<void> learnAcceptedWord({
@@ -165,16 +186,50 @@ abstract interface class OnscreenKeyboardLanguageModel {
   });
 }
 
-/// Optional personalization operations supported by adaptive language models.
-abstract interface class OnscreenKeyboardPersonalizationModel {
+/// Optional experimental swipe-decoding capability.
+// ignore: one_member_abstracts
+abstract interface class OnscreenKeyboardSwipeModel {
+  Future<List<OnscreenKeyboardSuggestion>> decodeSwipe(
+    OnscreenKeyboardSwipeRequest request,
+  );
+}
+
+/// Backwards-compatible aggregate implemented by existing language models.
+abstract interface class OnscreenKeyboardLanguageModel
+    implements OnscreenKeyboardSuggestionModel, OnscreenKeyboardSwipeModel {}
+
+/// Optional feedback capability for accepted and immediately undone fixes.
+// ignore: one_member_abstracts
+abstract interface class OnscreenKeyboardCorrectionLearningModel {
+  Future<void> recordCorrectionOutcome({
+    required Locale locale,
+    required String original,
+    required String replacement,
+    required bool accepted,
+  });
+}
+
+/// Optional explicit-suggestion personalization capability.
+// ignore: one_member_abstracts
+abstract interface class OnscreenKeyboardSuggestionPersonalizationModel {
+  Future<void> forgetWord({required Locale locale, required String word});
+}
+
+/// Optional experimental swipe-learning capability.
+// ignore: one_member_abstracts
+abstract interface class OnscreenKeyboardSwipeLearningModel {
   Future<void> learnSwipeGesture({
     required Locale locale,
     required String word,
     required OnscreenKeyboardSwipeData gesture,
   });
-
-  Future<void> forgetWord({required Locale locale, required String word});
 }
+
+/// Backwards-compatible personalization aggregate.
+abstract interface class OnscreenKeyboardPersonalizationModel
+    implements
+        OnscreenKeyboardSuggestionPersonalizationModel,
+        OnscreenKeyboardSwipeLearningModel {}
 
 /// Optional richer context learning while retaining the original model API.
 // ignore: one_member_abstracts
@@ -196,6 +251,7 @@ class OnscreenKeyboardLearningSnapshot {
     this.touchOffsets = const {},
     this.touchOffsetCounts = const {},
     this.blockedWords = const {},
+    this.correctionOutcomes = const {},
   });
 
   final Map<String, int> words;
@@ -204,6 +260,7 @@ class OnscreenKeyboardLearningSnapshot {
   final Map<String, Offset> touchOffsets;
   final Map<String, int> touchOffsetCounts;
   final Set<String> blockedWords;
+  final Map<String, int> correctionOutcomes;
 }
 
 /// Persistence adapter for device-local learning.
@@ -231,32 +288,44 @@ class OnscreenKeyboardPreparedLexicon {
     required this.prefixIndex,
     required this.swipeEdgeIndex,
     required this.wordIndex,
-  });
+    required _CompactLexiconTrie correctionTrie,
+  }) : _correctionTrie = correctionTrie;
 
   factory OnscreenKeyboardPreparedLexicon.prepare(
-    Iterable<OnscreenKeyboardLexiconEntry> source,
-  ) {
+    Iterable<OnscreenKeyboardLexiconEntry> source, {
+    bool includeExperimentalSwipeIndex = true,
+    bool includeLegacyLookupIndexes = true,
+  }) {
     final entries = List<OnscreenKeyboardLexiconEntry>.unmodifiable(source);
     final prefixes = <String, List<OnscreenKeyboardLexiconEntry>>{};
     final swipeEdges = <String, List<OnscreenKeyboardLexiconEntry>>{};
     final words = <String, OnscreenKeyboardLexiconEntry>{};
     for (final entry in entries) {
       final normalized = entry.word.toLowerCase();
-      words[normalized] = entry;
-      for (var length = 1; length <= math.min(4, normalized.length); length++) {
-        final prefix = normalized.substring(0, length);
-        prefixes.putIfAbsent(prefix, () => []).add(entry);
+      if (includeLegacyLookupIndexes) {
+        words[normalized] = entry;
+        for (
+          var length = 1;
+          length <= math.min(4, normalized.length);
+          length++
+        ) {
+          final prefix = normalized.substring(0, length);
+          prefixes.putIfAbsent(prefix, () => []).add(entry);
+        }
       }
-      final edges =
-          '${normalized.characters.first}\u0000'
-          '${normalized.characters.last}';
-      swipeEdges.putIfAbsent(edges, () => []).add(entry);
+      if (includeExperimentalSwipeIndex) {
+        final edges =
+            '${normalized.characters.first}\u0000'
+            '${normalized.characters.last}';
+        swipeEdges.putIfAbsent(edges, () => []).add(entry);
+      }
     }
     return OnscreenKeyboardPreparedLexicon._(
       entries: entries,
       prefixIndex: prefixes,
       swipeEdgeIndex: swipeEdges,
       wordIndex: words,
+      correctionTrie: _CompactLexiconTrie.build(entries),
     );
   }
 
@@ -264,6 +333,195 @@ class OnscreenKeyboardPreparedLexicon {
   final Map<String, List<OnscreenKeyboardLexiconEntry>> prefixIndex;
   final Map<String, List<OnscreenKeyboardLexiconEntry>> swipeEdgeIndex;
   final Map<String, OnscreenKeyboardLexiconEntry> wordIndex;
+  final _CompactLexiconTrie _correctionTrie;
+}
+
+/// One immutable static n-gram used for contextual ranking.
+@immutable
+class OnscreenKeyboardContextEntry {
+  // A const constructor cannot validate a List length in the supported SDK.
+  // ignore: prefer_const_constructors_in_immutables
+  OnscreenKeyboardContextEntry({
+    required this.words,
+    required this.weight,
+  }) : assert(
+         words.length == 2 || words.length == 3,
+         'Context entries must contain a bigram or trigram',
+       );
+
+  final List<String> words;
+  final double weight;
+}
+
+/// Context indexes prepared off the UI isolate with the lexicon.
+@immutable
+class OnscreenKeyboardPreparedContext {
+  OnscreenKeyboardPreparedContext.prepare(
+    Iterable<OnscreenKeyboardContextEntry> source,
+  ) {
+    for (final entry in source) {
+      final words = entry.words.map((word) => word.toLowerCase()).toList();
+      final key = words.join('\u0000');
+      if (words.length == 2) {
+        bigrams[key] = entry.weight;
+        nextWords.putIfAbsent(words.first, () => {})[words.last] = entry.weight;
+      } else {
+        trigrams[key] = entry.weight;
+        nextWords.putIfAbsent(
+          '${words[0]}\u0000${words[1]}',
+          () => {},
+        )[words.last] = entry.weight;
+      }
+    }
+  }
+
+  final Map<String, double> bigrams = {};
+  final Map<String, double> trigrams = {};
+  final Map<String, Map<String, double>> nextWords = {};
+}
+
+final class _MutableTrieNode {
+  final Map<int, int> children = {};
+  int terminalEntry = -1;
+}
+
+/// A compact immutable trie used for bounded edit-distance traversal.
+final class _CompactLexiconTrie {
+  const _CompactLexiconTrie({
+    required this.firstEdge,
+    required this.edgeCharacters,
+    required this.edgeTargets,
+    required this.terminalEntries,
+    required this.bestEntries,
+  });
+
+  factory _CompactLexiconTrie.build(
+    List<OnscreenKeyboardLexiconEntry> entries,
+  ) {
+    final nodes = <_MutableTrieNode>[_MutableTrieNode()];
+    for (var entryIndex = 0; entryIndex < entries.length; entryIndex++) {
+      var node = 0;
+      for (final rune in entries[entryIndex].word.toLowerCase().runes) {
+        node = nodes[node].children.putIfAbsent(rune, () {
+          nodes.add(_MutableTrieNode());
+          return nodes.length - 1;
+        });
+      }
+      nodes[node].terminalEntry = entryIndex;
+    }
+    final edgeCount = nodes.fold<int>(
+      0,
+      (total, node) => total + node.children.length,
+    );
+    final firstEdge = Uint32List(nodes.length + 1);
+    final edgeCharacters = Uint32List(edgeCount);
+    final edgeTargets = Uint32List(edgeCount);
+    final terminalEntries = Int32List(nodes.length);
+    final bestEntries = Int32List(nodes.length)..fillRange(0, nodes.length, -1);
+    var edge = 0;
+    for (var nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+      firstEdge[nodeIndex] = edge;
+      terminalEntries[nodeIndex] = nodes[nodeIndex].terminalEntry;
+      final children = nodes[nodeIndex].children.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      for (final child in children) {
+        edgeCharacters[edge] = child.key;
+        edgeTargets[edge] = child.value;
+        edge++;
+      }
+    }
+    firstEdge[nodes.length] = edge;
+    for (var nodeIndex = nodes.length - 1; nodeIndex >= 0; nodeIndex--) {
+      var best = terminalEntries[nodeIndex];
+      for (
+        var childEdge = firstEdge[nodeIndex];
+        childEdge < firstEdge[nodeIndex + 1];
+        childEdge++
+      ) {
+        final childBest = bestEntries[edgeTargets[childEdge]];
+        if (childBest >= 0 &&
+            (best < 0 || entries[childBest].weight > entries[best].weight)) {
+          best = childBest;
+        }
+      }
+      bestEntries[nodeIndex] = best;
+    }
+    return _CompactLexiconTrie(
+      firstEdge: firstEdge,
+      edgeCharacters: edgeCharacters,
+      edgeTargets: edgeTargets,
+      terminalEntries: terminalEntries,
+      bestEntries: bestEntries,
+    );
+  }
+
+  final Uint32List firstEdge;
+  final Uint32List edgeCharacters;
+  final Uint32List edgeTargets;
+  final Int32List terminalEntries;
+  final Int32List bestEntries;
+
+  int entryForWord(String word) {
+    var node = 0;
+    for (final rune in word.toLowerCase().runes) {
+      var next = -1;
+      for (var edge = firstEdge[node]; edge < firstEdge[node + 1]; edge++) {
+        if (edgeCharacters[edge] == rune) {
+          next = edgeTargets[edge];
+          break;
+        }
+      }
+      if (next < 0) return -1;
+      node = next;
+    }
+    return terminalEntries[node];
+  }
+
+  List<int> entriesForPrefix(
+    String prefix,
+    List<OnscreenKeyboardLexiconEntry> entries, {
+    int limit = 64,
+  }) {
+    var node = 0;
+    for (final rune in prefix.toLowerCase().runes) {
+      var next = -1;
+      for (var edge = firstEdge[node]; edge < firstEdge[node + 1]; edge++) {
+        if (edgeCharacters[edge] == rune) {
+          next = edgeTargets[edge];
+          break;
+        }
+      }
+      if (next < 0) return const [];
+      node = next;
+    }
+    final frontier = <int>[node];
+    final result = <int>[];
+    while (frontier.isNotEmpty && result.length < limit) {
+      frontier.sort(
+        (a, b) => entries[bestEntries[b]].weight.compareTo(
+          entries[bestEntries[a]].weight,
+        ),
+      );
+      final current = frontier.removeAt(0);
+      final terminal = terminalEntries[current];
+      if (terminal >= 0) result.add(terminal);
+      for (
+        var edge = firstEdge[current];
+        edge < firstEdge[current + 1];
+        edge++
+      ) {
+        frontier.add(edgeTargets[edge]);
+      }
+    }
+    return result;
+  }
+}
+
+final class _CorrectionMatch {
+  const _CorrectionMatch(this.entryIndex, this.cost);
+
+  final int entryIndex;
+  final double cost;
 }
 
 /// Dependency-free weighted lexicon suitable for deterministic offline use.
@@ -271,18 +529,28 @@ class WeightedLexiconLanguageModel
     implements
         OnscreenKeyboardLanguageModel,
         OnscreenKeyboardPersonalizationModel,
-        OnscreenKeyboardContextLanguageModel {
+        OnscreenKeyboardContextLanguageModel,
+        OnscreenKeyboardCorrectionLearningModel {
   WeightedLexiconLanguageModel({
     required Map<String, Iterable<OnscreenKeyboardLexiconEntry>> lexicons,
+    Map<String, Iterable<OnscreenKeyboardContextEntry>> contexts = const {},
     this.learningStore,
     this.maximumLearnedWords = 2000,
     this.maximumLearnedBigrams = 4000,
     this.maximumLearnedTrigrams = 6000,
     this.maximumBlockedWords = 500,
+    this.maximumCorrectionOutcomes = 2000,
+    this.minimumAutocorrectWeight = 3.2,
   }) {
     _installPrepared({
       for (final entry in lexicons.entries)
         entry.key.toLowerCase(): OnscreenKeyboardPreparedLexicon.prepare(
+          entry.value,
+        ),
+    });
+    _installContexts({
+      for (final entry in contexts.entries)
+        entry.key.toLowerCase(): OnscreenKeyboardPreparedContext.prepare(
           entry.value,
         ),
     });
@@ -291,52 +559,65 @@ class WeightedLexiconLanguageModel
   /// Creates a model from lexicons indexed on a background isolate.
   WeightedLexiconLanguageModel.prepared({
     required Map<String, OnscreenKeyboardPreparedLexicon> lexicons,
+    Map<String, OnscreenKeyboardPreparedContext> contexts = const {},
     this.learningStore,
     this.maximumLearnedWords = 2000,
     this.maximumLearnedBigrams = 4000,
     this.maximumLearnedTrigrams = 6000,
     this.maximumBlockedWords = 500,
+    this.maximumCorrectionOutcomes = 2000,
+    this.minimumAutocorrectWeight = 3.2,
   }) {
     _installPrepared({
       for (final entry in lexicons.entries)
         entry.key.toLowerCase(): entry.value,
     });
+    _installContexts(contexts);
   }
 
-  void _installPrepared(
-    Map<String, OnscreenKeyboardPreparedLexicon> prepared,
-  ) {
+  void _installPrepared(Map<String, OnscreenKeyboardPreparedLexicon> prepared) {
     _lexicons = {
       for (final entry in prepared.entries) entry.key: entry.value.entries,
     };
     for (final entry in prepared.entries) {
-      _prefixIndex[entry.key] = entry.value.prefixIndex;
       _swipeEdgeIndex[entry.key] = entry.value.swipeEdgeIndex;
-      _wordIndex[entry.key] = entry.value.wordIndex;
+      _correctionTries[entry.key] = entry.value._correctionTrie;
+    }
+  }
+
+  void _installContexts(Map<String, OnscreenKeyboardPreparedContext> prepared) {
+    for (final entry in prepared.entries) {
+      final language = entry.key.toLowerCase();
+      _staticBigrams[language] = entry.value.bigrams;
+      _staticTrigrams[language] = entry.value.trigrams;
+      _staticNextWords[language] = entry.value.nextWords;
     }
   }
 
   late final Map<String, List<OnscreenKeyboardLexiconEntry>> _lexicons;
   final Map<String, Map<String, List<OnscreenKeyboardLexiconEntry>>>
-  _prefixIndex = {};
-  final Map<String, Map<String, List<OnscreenKeyboardLexiconEntry>>>
   _swipeEdgeIndex = {};
-  final Map<String, Map<String, OnscreenKeyboardLexiconEntry>> _wordIndex = {};
+  final Map<String, _CompactLexiconTrie> _correctionTries = {};
+  final Map<String, Map<String, double>> _staticBigrams = {};
+  final Map<String, Map<String, double>> _staticTrigrams = {};
+  final Map<String, Map<String, Map<String, double>>> _staticNextWords = {};
   final OnscreenKeyboardLearningStore? learningStore;
   final int maximumLearnedWords;
   final int maximumLearnedBigrams;
   final int maximumLearnedTrigrams;
   final int maximumBlockedWords;
+  final int maximumCorrectionOutcomes;
+  final double minimumAutocorrectWeight;
   final Map<String, OnscreenKeyboardLearningSnapshot> _learning = {};
-  final Set<String> _loaded = {};
+  final Map<String, Future<void>> _loading = {};
 
   Future<void> _ensureLoaded(Locale locale) async {
     final language = locale.languageCode.toLowerCase();
-    if (_loaded.add(language)) {
+    await _loading.putIfAbsent(language, () async {
       _learning[language] =
           await learningStore?.load(locale) ??
           const OnscreenKeyboardLearningSnapshot();
-    }
+    });
   }
 
   @override
@@ -352,16 +633,19 @@ class WeightedLexiconLanguageModel
     final entries =
         _lexicons[language] ?? const <OnscreenKeyboardLexiconEntry>[];
     final sourceByWord = <String, OnscreenKeyboardLexiconEntry>{};
-    var source = entries.take(256);
+    final correctionCosts = <String, double>{};
+    final trie = _correctionTries[language];
+    var source = trie == null
+        ? entries.take(256)
+        : trie
+              .entriesForPrefix('', entries, limit: 256)
+              .map((entryIndex) => entries[entryIndex]);
     if (prefix.isNotEmpty) {
-      source = const <OnscreenKeyboardLexiconEntry>[];
-      for (var length = math.min(4, prefix.length); length >= 1; length--) {
-        final matches = _prefixIndex[language]?[prefix.substring(0, length)];
-        if (matches != null && matches.isNotEmpty) {
-          source = matches;
-          break;
-        }
-      }
+      source = trie == null
+          ? const <OnscreenKeyboardLexiconEntry>[]
+          : trie
+                .entriesForPrefix(prefix, entries)
+                .map((entryIndex) => entries[entryIndex]);
     } else {
       final contextualKeys = <String>{};
       final previous = request.previousWord?.toLowerCase();
@@ -381,9 +665,35 @@ class WeightedLexiconLanguageModel
           }
         }
       }
+      final staticNext = _staticNextWords[language];
+      if (previous != null && previousPrevious != null) {
+        contextualKeys.addAll(
+          staticNext?['$previousPrevious\u0000$previous']?.keys ?? const [],
+        );
+      }
+      if (previous != null) {
+        contextualKeys.addAll(staticNext?[previous]?.keys ?? const []);
+      }
       for (final word in contextualKeys) {
-        final entry = _wordIndex[language]?[word];
-        if (entry != null) sourceByWord[word] = entry;
+        final entryIndex = _correctionTries[language]?.entryForWord(word) ?? -1;
+        if (entryIndex >= 0) sourceByWord[word] = entries[entryIndex];
+      }
+    }
+    if (prefix.isNotEmpty) {
+      final centers = {
+        ..._defaultKeyCenters(language),
+        ...request.keyCenters,
+      };
+      for (final match in _correctionCandidates(
+        language,
+        prefix,
+        request.tapSamples,
+        centers,
+      )) {
+        final entry = entries[match.entryIndex];
+        final word = entry.word.toLowerCase();
+        sourceByWord[word] = entry;
+        correctionCosts[word] = match.cost;
       }
     }
     for (final entry in source.take(4096)) {
@@ -393,15 +703,18 @@ class WeightedLexiconLanguageModel
       request.cancellationToken.throwIfCancelled();
       final word = entry.word.toLowerCase();
       if (learned.blockedWords.contains(word)) continue;
-      final distance = _editDistance(prefix, word);
+      final editCost =
+          correctionCosts[word] ??
+          _weightedWordDistance(prefix, word, const [], const {});
       final begins = word.startsWith(prefix);
       if (prefix.isNotEmpty &&
           !begins &&
-          distance > math.max(1, prefix.length ~/ 3)) {
+          editCost > _maximumCorrectionCost(prefix)) {
         continue;
       }
       final learnedBoost = math.log(1 + (learned.words[word] ?? 0)) * 0.35;
       final contextBoost = _contextBoost(
+        language,
         learned,
         word,
         request.previousWord,
@@ -409,37 +722,49 @@ class WeightedLexiconLanguageModel
       );
       final similarity = prefix.isEmpty
           ? 0.0
-          : 1 - distance / math.max(prefix.length, word.length);
+          : 1 - editCost / math.max(prefix.length, word.length);
+      final rejection = learned.correctionOutcomes['$prefix\u0000$word'] ?? 0;
+      final correctionPenalty = rejection < 0 ? -math.log(1 - rejection) : 0;
+      final correctionAcceptance = rejection > 0 ? math.log(1 + rejection) : 0;
       final score =
           entry.weight +
           (begins ? 1.2 : 0) +
           similarity +
           learnedBoost +
-          contextBoost;
+          contextBoost -
+          correctionPenalty +
+          correctionAcceptance * .28;
+      final correctionConfidence = begins
+          ? (0.72 + similarity * .2).clamp(0, 1).toDouble()
+          : (0.982 +
+                    (entry.weight - minimumAutocorrectWeight).clamp(0, 3) *
+                        .0045 -
+                    editCost * .006 -
+                    correctionPenalty * .02 +
+                    correctionAcceptance * .002 +
+                    contextBoost.clamp(0, 1) * .003)
+                .clamp(0, .999)
+                .toDouble();
       candidates.add(
         OnscreenKeyboardSuggestion(
           word: entry.word,
           score: score,
-          confidence: (0.52 + similarity * 0.52 + (begins ? 0.08 : 0))
-              .clamp(
-                0,
-                1,
-              )
-              .toDouble(),
+          confidence: correctionConfidence,
           kind: prefix.isEmpty
               ? OnscreenKeyboardSuggestionKind.nextWord
               : begins
               ? OnscreenKeyboardSuggestionKind.completion
-              : OnscreenKeyboardSuggestionKind.correction,
+              : entry.weight >= minimumAutocorrectWeight
+              ? OnscreenKeyboardSuggestionKind.correction
+              : OnscreenKeyboardSuggestionKind.completion,
         ),
       );
     }
     candidates.sort((a, b) => b.score.compareTo(a.score));
     if (prefix.isNotEmpty) {
+      final exactMatch = _isKnownWord(language, prefix);
       candidates
-        ..removeWhere(
-          (candidate) => candidate.word.toLowerCase() == prefix,
-        )
+        ..removeWhere((candidate) => candidate.word.toLowerCase() == prefix)
         ..insert(
           0,
           OnscreenKeyboardSuggestion(
@@ -447,10 +772,33 @@ class WeightedLexiconLanguageModel
             score: candidates.isEmpty ? 0 : candidates.first.score + .01,
             confidence: 1,
             kind: OnscreenKeyboardSuggestionKind.typed,
+            exactMatch: exactMatch,
           ),
         );
     }
     return candidates.take(request.limit).toList(growable: false);
+  }
+
+  bool _isKnownWord(String language, String word) {
+    final trie = _correctionTries[language];
+    if (trie == null) return false;
+    final normalized = word.toLowerCase();
+    if (trie.entryForWord(normalized) >= 0) return true;
+    if (language != 'de' || normalized.length < 6) return false;
+    final partCounts = List<int>.filled(normalized.length + 1, -1)..[0] = 0;
+    for (var end = 3; end <= normalized.length; end++) {
+      for (var start = 0; start <= end - 3; start++) {
+        if (partCounts[start] < 0) continue;
+        var component = normalized.substring(start, end);
+        if (component.length > 3 && component.startsWith('s')) {
+          component = component.substring(1);
+        }
+        if (trie.entryForWord(component) >= 0) {
+          partCounts[end] = math.max(partCounts[end], partCounts[start] + 1);
+        }
+      }
+    }
+    return partCounts.last >= 2;
   }
 
   @override
@@ -516,6 +864,7 @@ class WeightedLexiconLanguageModel
       }
       final learnedBoost = math.log(1 + (learned.words[word] ?? 0)) * 0.35;
       final contextBoost = _contextBoost(
+        language,
         learned,
         word,
         request.previousWord,
@@ -564,7 +913,8 @@ class WeightedLexiconLanguageModel
     return result;
   }
 
-  static double _contextBoost(
+  double _contextBoost(
+    String language,
     OnscreenKeyboardLearningSnapshot learned,
     String word,
     String? previousWord,
@@ -578,7 +928,18 @@ class WeightedLexiconLanguageModel
     final trigram = previous == null || previousPrevious == null
         ? 0
         : learned.trigrams['$previousPrevious\u0000$previous\u0000$word'] ?? 0;
-    return math.log(1 + bigram) * .55 + math.log(1 + trigram) * .8;
+    final staticBigram = previous == null
+        ? 0.0
+        : _staticBigrams[language]?['$previous\u0000$word'] ?? 0.0;
+    final staticTrigram = previous == null || previousPrevious == null
+        ? 0.0
+        : _staticTrigrams[language]?['$previousPrevious\u0000'
+                  '$previous\u0000$word'] ??
+              0.0;
+    return math.log(1 + bigram) * .55 +
+        math.log(1 + trigram) * .8 +
+        staticBigram * .42 +
+        staticTrigram * .62;
   }
 
   Iterable<OnscreenKeyboardLexiconEntry> _swipeCandidates(
@@ -616,6 +977,216 @@ class WeightedLexiconLanguageModel
       );
     final result = entries.take(3).map((entry) => entry.key).toList();
     if (!result.contains(fallback)) result.add(fallback);
+    return result;
+  }
+
+  Iterable<_CorrectionMatch> _correctionCandidates(
+    String language,
+    String typed,
+    List<OnscreenKeyboardTapSample> tapSamples,
+    Map<String, Offset> keyCenters,
+  ) {
+    final trie = _correctionTries[language];
+    if (trie == null || typed.isEmpty) return const [];
+    final query = typed.toLowerCase().runes.toList(growable: false);
+    final maximumCost = _maximumCorrectionCost(typed);
+    final initial = List<double>.generate(
+      query.length + 1,
+      (index) => index.toDouble(),
+    );
+    final matches = <_CorrectionMatch>[];
+
+    void visit(
+      int node,
+      int candidateRune,
+      List<double> previous,
+      List<double>? previousPrevious,
+      int? previousCandidateRune,
+    ) {
+      final current = List<double>.filled(query.length + 1, 0)
+        ..[0] = previous[0] + 1;
+      var rowMinimum = current[0];
+      for (var column = 1; column <= query.length; column++) {
+        final queryRune = query[column - 1];
+        final deletionCost = column > 1 && queryRune == query[column - 2]
+            ? .55
+            : 1.0;
+        final insertionCost = previousCandidateRune == candidateRune
+            ? .55
+            : 1.0;
+        final substitutionCost = _substitutionCost(
+          queryRune,
+          candidateRune,
+          column - 1,
+          tapSamples,
+          keyCenters,
+        );
+        var cost = math.min(
+          current[column - 1] + deletionCost,
+          math.min(
+            previous[column] + insertionCost,
+            previous[column - 1] + substitutionCost,
+          ),
+        );
+        if (previousPrevious != null &&
+            previousCandidateRune != null &&
+            column > 1 &&
+            candidateRune == query[column - 2] &&
+            previousCandidateRune == queryRune) {
+          cost = math.min(cost, previousPrevious[column - 2] + .45);
+        }
+        current[column] = cost;
+        rowMinimum = math.min(rowMinimum, cost);
+      }
+      final terminal = trie.terminalEntries[node];
+      if (terminal >= 0 && current.last <= maximumCost) {
+        matches.add(_CorrectionMatch(terminal, current.last));
+      }
+      if (rowMinimum > maximumCost) return;
+      for (
+        var edge = trie.firstEdge[node];
+        edge < trie.firstEdge[node + 1];
+        edge++
+      ) {
+        visit(
+          trie.edgeTargets[edge],
+          trie.edgeCharacters[edge],
+          current,
+          previous,
+          candidateRune,
+        );
+      }
+    }
+
+    for (var edge = trie.firstEdge[0]; edge < trie.firstEdge[1]; edge++) {
+      visit(
+        trie.edgeTargets[edge],
+        trie.edgeCharacters[edge],
+        initial,
+        null,
+        null,
+      );
+    }
+    matches.sort((a, b) {
+      final byCost = a.cost.compareTo(b.cost);
+      if (byCost != 0) return byCost;
+      return b.entryIndex.compareTo(a.entryIndex);
+    });
+    return matches.take(256);
+  }
+
+  static double _maximumCorrectionCost(String typed) => switch (typed.length) {
+    <= 3 => 1.05,
+    <= 7 => 1.55,
+    _ => 2.05,
+  };
+
+  static double _weightedWordDistance(
+    String typed,
+    String candidate,
+    List<OnscreenKeyboardTapSample> tapSamples,
+    Map<String, Offset> keyCenters,
+  ) {
+    final source = typed.toLowerCase().runes.toList(growable: false);
+    final target = candidate.toLowerCase().runes.toList(growable: false);
+    var previousPrevious = <double>[];
+    var previous = List<double>.generate(
+      source.length + 1,
+      (index) => index.toDouble(),
+    );
+    for (var row = 1; row <= target.length; row++) {
+      final current = List<double>.filled(source.length + 1, 0)
+        ..[0] = row.toDouble();
+      for (var column = 1; column <= source.length; column++) {
+        final sourceRune = source[column - 1];
+        final targetRune = target[row - 1];
+        var cost = math.min(
+          current[column - 1] +
+              (column > 1 && sourceRune == source[column - 2] ? .55 : 1),
+          math.min(
+            previous[column] +
+                (row > 1 && targetRune == target[row - 2] ? .55 : 1),
+            previous[column - 1] +
+                _substitutionCost(
+                  sourceRune,
+                  targetRune,
+                  column - 1,
+                  tapSamples,
+                  keyCenters,
+                ),
+          ),
+        );
+        if (row > 1 &&
+            column > 1 &&
+            targetRune == source[column - 2] &&
+            target[row - 2] == sourceRune) {
+          cost = math.min(cost, previousPrevious[column - 2] + .45);
+        }
+        current[column] = cost;
+      }
+      previousPrevious = previous;
+      previous = current;
+    }
+    return previous.last;
+  }
+
+  static double _substitutionCost(
+    int typedRune,
+    int candidateRune,
+    int typedIndex,
+    List<OnscreenKeyboardTapSample> tapSamples,
+    Map<String, Offset> keyCenters,
+  ) {
+    if (typedRune == candidateRune) return 0;
+    final typed = String.fromCharCode(typedRune);
+    final candidate = String.fromCharCode(candidateRune);
+    if (_foldAccent(typed) == _foldAccent(candidate)) return .28;
+    final candidateCenter = keyCenters[candidate];
+    if (typedIndex < tapSamples.length && candidateCenter != null) {
+      return (.22 +
+              (tapSamples[typedIndex].position - candidateCenter).distance *
+                  3.3)
+          .clamp(.22, 1.25);
+    }
+    final typedCenter = keyCenters[typed];
+    if (typedCenter != null && candidateCenter != null) {
+      return (.32 + (typedCenter - candidateCenter).distance * 2.4).clamp(
+        .32,
+        1.25,
+      );
+    }
+    return 1;
+  }
+
+  static String _foldAccent(String value) => switch (value) {
+    'ä' || 'á' || 'à' || 'â' || 'ã' || 'å' => 'a',
+    'ë' || 'é' || 'è' || 'ê' => 'e',
+    'ï' || 'í' || 'ì' || 'î' => 'i',
+    'ö' || 'ó' || 'ò' || 'ô' || 'õ' => 'o',
+    'ü' || 'ú' || 'ù' || 'û' => 'u',
+    'ß' => 's',
+    _ => value,
+  };
+
+  static Map<String, Offset> _defaultKeyCenters(String language) {
+    final top = language == 'de' ? 'qwertzuiop' : 'qwertyuiop';
+    const middle = 'asdfghjkl';
+    final bottom = language == 'de' ? 'yxcvbnm' : 'zxcvbnm';
+    final result = <String, Offset>{};
+    void addRow(String row, double y, double inset) {
+      for (var index = 0; index < row.length; index++) {
+        result[row[index]] = Offset(inset + (index + .5) * .09, y);
+      }
+    }
+
+    addRow(top, .2, .05);
+    addRow(middle, .5, .095);
+    addRow(bottom, .8, .14);
+    result
+      ..['ä'] = result['a']!
+      ..['ö'] = result['o']!
+      ..['ü'] = result['u']!
+      ..['ß'] = result['s']!;
     return result;
   }
 
@@ -668,6 +1239,7 @@ class WeightedLexiconLanguageModel
       touchOffsets: current.touchOffsets,
       touchOffsetCounts: current.touchOffsetCounts,
       blockedWords: blockedWords,
+      correctionOutcomes: current.correctionOutcomes,
     );
     await _save(locale, next);
   }
@@ -699,6 +1271,7 @@ class WeightedLexiconLanguageModel
         touchOffsets: current.touchOffsets,
         touchOffsetCounts: current.touchOffsetCounts,
         blockedWords: blockedWords,
+        correctionOutcomes: current.correctionOutcomes,
       ),
     );
   }
@@ -743,6 +1316,45 @@ class WeightedLexiconLanguageModel
         touchOffsets: offsets,
         touchOffsetCounts: counts,
         blockedWords: current.blockedWords,
+        correctionOutcomes: current.correctionOutcomes,
+      ),
+    );
+  }
+
+  @override
+  Future<void> recordCorrectionOutcome({
+    required Locale locale,
+    required String original,
+    required String replacement,
+    required bool accepted,
+  }) async {
+    await _ensureLoaded(locale);
+    final language = locale.languageCode.toLowerCase();
+    final current = _learning[language]!;
+    final normalizedOriginal = original.toLowerCase();
+    final normalizedReplacement = replacement.toLowerCase();
+    if (normalizedOriginal.isEmpty ||
+        normalizedReplacement.isEmpty ||
+        normalizedOriginal == normalizedReplacement) {
+      return;
+    }
+    final outcomes = Map<String, int>.of(current.correctionOutcomes);
+    final key = '$normalizedOriginal\u0000$normalizedReplacement';
+    outcomes[key] = ((outcomes[key] ?? 0) + (accepted ? 1 : -1)).clamp(
+      -8,
+      8,
+    );
+    _trimOutcomes(outcomes, maximumCorrectionOutcomes);
+    await _save(
+      locale,
+      OnscreenKeyboardLearningSnapshot(
+        words: current.words,
+        bigrams: current.bigrams,
+        trigrams: current.trigrams,
+        touchOffsets: current.touchOffsets,
+        touchOffsetCounts: current.touchOffsetCounts,
+        blockedWords: current.blockedWords,
+        correctionOutcomes: outcomes,
       ),
     );
   }
@@ -762,6 +1374,16 @@ class WeightedLexiconLanguageModel
       ..sort((a, b) {
         final byCount = values[b]!.compareTo(values[a]!);
         return byCount != 0 ? byCount : a.compareTo(b);
+      });
+    keys.skip(limit).forEach(values.remove);
+  }
+
+  static void _trimOutcomes(Map<String, int> values, int limit) {
+    if (values.length <= limit) return;
+    final keys = values.keys.toList()
+      ..sort((a, b) {
+        final byMagnitude = values[b]!.abs().compareTo(values[a]!.abs());
+        return byMagnitude != 0 ? byMagnitude : a.compareTo(b);
       });
     keys.skip(limit).forEach(values.remove);
   }
@@ -798,10 +1420,7 @@ class WeightedLexiconLanguageModel
     return coverage * 0.82 + density * 0.18;
   }
 
-  static double _geometrySimilarity(
-    List<Offset> trace,
-    List<Offset> template,
-  ) {
+  static double _geometrySimilarity(List<Offset> trace, List<Offset> template) {
     if (trace.length != template.length || trace.length < 2) return 0;
     var locationDistance = 0.0;
     for (var index = 0; index < trace.length; index++) {
@@ -873,22 +1492,5 @@ class WeightedLexiconLanguageModel
       result.add(Offset.lerp(points[segment - 1], points[segment], t)!);
     }
     return result;
-  }
-
-  static int _editDistance(String a, String b) {
-    final previous = List<int>.generate(b.length + 1, (index) => index);
-    for (var i = 0; i < a.length; i++) {
-      var diagonal = previous[0];
-      previous[0] = i + 1;
-      for (var j = 0; j < b.length; j++) {
-        final above = previous[j + 1];
-        previous[j + 1] = math.min(
-          math.min(previous[j] + 1, above + 1),
-          diagonal + (a.codeUnitAt(i) == b.codeUnitAt(j) ? 0 : 1),
-        );
-        diagonal = above;
-      }
-    }
-    return previous.last;
   }
 }

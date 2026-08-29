@@ -51,6 +51,29 @@ void main() {
     expect(_alternatePopover, findsNothing);
   });
 
+  testWidgets('disabled swipe drag produces neither a trace nor text', (
+    tester,
+  ) async {
+    await _startPlayground(tester);
+    final field = find.byKey(const ValueKey('typing-and-return-field'));
+    await tester.tap(find.byTooltip('Disable experimental swipe'));
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(
+      _keyCenter(tester, 'h'),
+      // Kept explicit: this scenario verifies the touch pointer path.
+      // ignore: avoid_redundant_argument_values
+      kind: PointerDeviceKind.touch,
+    );
+    await gesture.moveTo(_keyCenter(tester, 'e'));
+    await gesture.moveTo(_keyCenter(tester, 'l'));
+    await gesture.moveTo(_keyCenter(tester, 'o'));
+    await tester.pump(const Duration(milliseconds: 40));
+    await gesture.up();
+    await tester.pump();
+
+    expect(_textOf(tester, field), isEmpty);
+  });
+
   testWidgets('touch hold repeats backspace and stops immediately on release', (
     tester,
   ) async {

@@ -475,6 +475,30 @@ void main() {
     expect(languageModel.lastKeyCenters, contains('h'));
   });
 
+  testWidgets('swipe-disabled drags produce no trace and no text', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final languageModel = _TrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: languageModel,
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+      swipeTypingEnabled: false,
+    );
+    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
+    await gesture.moveTo(tester.getCenter(find.text('e')));
+    await gesture.moveTo(tester.getCenter(find.text('l')));
+    await gesture.moveTo(tester.getCenter(find.text('o')));
+    await tester.pump(const Duration(milliseconds: 40));
+    await gesture.up();
+    await tester.pump();
+
+    expect(languageModel.decodeCount, 0);
+    expect(controller.text, isEmpty);
+  });
+
   testWidgets('phone keys stay compact and backspace is in the top row', (
     tester,
   ) async {
@@ -526,6 +550,42 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.backspace_outlined));
     expect(controller.text, 'helo');
+  });
+
+  testWidgets('correction learning waits for continuation and records undo', (
+    tester,
+  ) async {
+    final rejectedController = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final rejectedModel = _CorrectionTrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: rejectedController,
+      languageModel: rejectedModel,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    expect(rejectedModel.accepted, 0);
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
+    expect(rejectedModel.rejected, 1);
+
+    final acceptedController = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final acceptedModel = _CorrectionTrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: acceptedController,
+      languageModel: acceptedModel,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.tap(find.text('w'));
+    await tester.pump();
+    expect(acceptedModel.accepted, 1);
+    expect(acceptedModel.rejected, 0);
   });
 
   testWidgets('holding space moves the cursor without inserting a space', (
@@ -634,6 +694,7 @@ Future<void> _pumpKeyboard(
   TextInputAction? textInputAction,
   int? minLines,
   int? maxLines = 1,
+  bool swipeTypingEnabled = true,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -641,6 +702,7 @@ Future<void> _pumpKeyboard(
         presentation: OnscreenKeyboardPresentation.docked,
         languageModel: languageModel,
         typingMode: typingMode,
+        swipeTypingEnabled: swipeTypingEnabled,
         feedback: const OnscreenKeyboardFeedback(enableHaptics: false),
         child: Scaffold(
           body: OnscreenKeyboardTextField(
@@ -700,6 +762,26 @@ class _TrackingLanguageModel extends _StaticLanguageModel {
     lastPoints = request.points;
     lastKeyCenters = request.keyCenters;
     return super.decodeSwipe(request);
+  }
+}
+
+class _CorrectionTrackingLanguageModel extends _StaticLanguageModel
+    implements OnscreenKeyboardCorrectionLearningModel {
+  int accepted = 0;
+  int rejected = 0;
+
+  @override
+  Future<void> recordCorrectionOutcome({
+    required Locale locale,
+    required String original,
+    required String replacement,
+    required bool accepted,
+  }) async {
+    if (accepted) {
+      this.accepted++;
+    } else {
+      rejected++;
+    }
   }
 }
 
