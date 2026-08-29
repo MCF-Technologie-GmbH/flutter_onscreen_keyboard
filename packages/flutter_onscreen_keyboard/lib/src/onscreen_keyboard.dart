@@ -493,8 +493,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         ? candidate.score
         : candidate.score - corrections[1].score;
     final requiredMargin = _locale.languageCode.toLowerCase() == 'de'
-        ? .42
-        : .46;
+        ? .5
+        : 1.7;
     if (candidate.word.toLowerCase() == original.toLowerCase() ||
         candidate.confidence < .985 ||
         margin < requiredMargin ||

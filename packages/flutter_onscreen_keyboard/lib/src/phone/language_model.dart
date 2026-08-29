@@ -773,26 +773,56 @@ class WeightedLexiconLanguageModel
       final similarity = prefix.isEmpty
           ? 0.0
           : 1 - editCost / math.max(prefix.length, word.length);
+      final firstAgreement =
+          prefix.isNotEmpty &&
+              word.isNotEmpty &&
+              prefix.characters.first == word.characters.first
+          ? .55
+          : -.45;
+      final lastAgreement =
+          prefix.isNotEmpty &&
+              word.isNotEmpty &&
+              prefix.characters.last == word.characters.last
+          ? .4
+          : -.3;
+      final lengthPenalty = (prefix.length - word.length).abs() * .48;
       final rejection = learned.correctionOutcomes['$prefix\u0000$word'] ?? 0;
       final correctionPenalty = rejection < 0 ? -math.log(1 - rejection) : 0;
       final correctionAcceptance = rejection > 0 ? math.log(1 + rejection) : 0;
-      final score =
-          entry.weight +
-          (begins ? 1.2 : 0) +
-          similarity +
-          learnedBoost +
-          contextBoost -
-          correctionPenalty +
-          correctionAcceptance * .28;
+      final score = begins || prefix.isEmpty
+          ? entry.weight +
+                (begins ? 1.2 : 0) +
+                similarity +
+                learnedBoost +
+                contextBoost -
+                correctionPenalty +
+                correctionAcceptance * .28
+          : entry.weight * .42 +
+                similarity * 1.4 -
+                editCost * 2.45 -
+                lengthPenalty +
+                firstAgreement +
+                lastAgreement +
+                learnedBoost +
+                contextBoost * 1.35 -
+                correctionPenalty +
+                correctionAcceptance * .28;
       final correctionConfidence = begins
           ? (0.72 + similarity * .2).clamp(0, 1).toDouble()
-          : (0.982 +
-                    (entry.weight - minimumAutocorrectWeight).clamp(0, 3) *
-                        .0045 -
-                    editCost * .006 -
-                    correctionPenalty * .02 +
-                    correctionAcceptance * .002 +
-                    contextBoost.clamp(0, 1) * .003)
+          : (entry.weight < minimumAutocorrectWeight
+                    ? .9
+                    : (0.986 +
+                          (entry.weight - minimumAutocorrectWeight).clamp(
+                                0,
+                                3,
+                              ) *
+                              .0025 -
+                          editCost * .0025 +
+                          (firstAgreement > 0 ? .001 : 0) +
+                          (lastAgreement > 0 ? .001 : 0) -
+                          correctionPenalty * .02 +
+                          correctionAcceptance * .002 +
+                          contextBoost.clamp(0, 1) * .003))
                 .clamp(0, .999)
                 .toDouble();
       candidates.add(
