@@ -873,6 +873,11 @@ class WeightedLexiconLanguageModel
     for (var end = 3; end <= normalized.length; end++) {
       for (var start = 0; start <= end - 3; start++) {
         if (partCounts[start] < 0) continue;
+        // Short leading words and particles create many convincing-looking
+        // misspellings (for example, `vor` + `raus`). Known short compounds
+        // remain exact lexicon matches; only the productive-compound fallback
+        // is deliberately conservative.
+        if (start == 0 && end < 4) continue;
         var component = normalized.substring(start, end);
         if (component.length > 3 && component.startsWith('s')) {
           component = component.substring(1);

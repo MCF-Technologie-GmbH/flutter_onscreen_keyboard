@@ -139,6 +139,8 @@ void main() {
         'de': [
           OnscreenKeyboardLexiconEntry('haus', 9),
           OnscreenKeyboardLexiconEntry('tür', 8),
+          OnscreenKeyboardLexiconEntry('vor', 10),
+          OnscreenKeyboardLexiconEntry('raus', 9),
         ],
       },
     );
@@ -159,6 +161,15 @@ void main() {
 
     expect(exact.first.exactMatch, isTrue);
     expect(compound.first.exactMatch, isTrue);
+
+    final plausibleMisspelling = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'vorraus',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+    expect(plausibleMisspelling.first.exactMatch, isFalse);
   });
 
   test('accepts a lexicon prepared off the UI isolate', () async {
