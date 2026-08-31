@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -552,6 +554,50 @@ void main() {
     expect(controller.text, 'helo');
   });
 
+  testWidgets('boundary waits for the current asynchronous correction', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final model = _DelayedLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    expect(controller.text, 'helo ');
+    model.complete();
+    await tester.pump();
+    expect(controller.text, 'hello ');
+
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    expect(controller.text, 'helo');
+  });
+
+  testWidgets('later input cancels a pending boundary correction', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final model = _DelayedLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.tap(find.text('w'));
+    expect(controller.text, 'helo w');
+    model.complete();
+    await tester.pump();
+    expect(controller.text, 'helo w');
+  });
+
   testWidgets('correction learning waits for continuation and records undo', (
     tester,
   ) async {
@@ -783,6 +829,20 @@ class _CorrectionTrackingLanguageModel extends _StaticLanguageModel
       rejected++;
     }
   }
+}
+
+class _DelayedLanguageModel extends _StaticLanguageModel {
+  final _completer = Completer<List<OnscreenKeyboardSuggestion>>();
+
+  void complete() => _completer.complete(const [
+    OnscreenKeyboardSuggestion(word: 'hello', score: 10, confidence: .99),
+    OnscreenKeyboardSuggestion(word: 'help', score: 8, confidence: .8),
+  ]);
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> suggestions(
+    OnscreenKeyboardSuggestionRequest request,
+  ) => _completer.future;
 }
 
 class _LowConfidenceLanguageModel extends _StaticLanguageModel {
