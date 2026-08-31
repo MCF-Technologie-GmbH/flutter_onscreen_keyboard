@@ -662,6 +662,7 @@ class WeightedLexiconLanguageModel
   final Map<String, Future<void>> _loading = {};
 
   static const _minimumGermanAccentAutocorrectWeight = 2.7;
+  static const _minimumGermanAccentRankingWeight = 4.5;
   static const _maximumGermanAccentEvidenceCost = 1.25;
 
   Future<void> _ensureLoaded(Locale locale) async {
@@ -800,15 +801,15 @@ class WeightedLexiconLanguageModel
               centers,
             )
           : null;
-      final germanAccentBoost = switch (germanAccentEvidence) {
-        0 => 3.2,
-        final cost? when cost <= _maximumGermanAccentEvidenceCost => 1.5,
-        _ => 0.0,
-      };
+      final germanAccentBoost =
+          germanAccentEvidence == 0 &&
+              entry.weight >= _minimumGermanAccentRankingWeight
+          ? 3.2
+          : 0.0;
       final errorPatternBoost =
           _deterministicErrorPatternBoost(prefix, word) + germanAccentBoost;
       final germanAccentAutocorrectEligible =
-          germanAccentBoost > 0 &&
+          germanAccentEvidence != null &&
           entry.weight >= _minimumGermanAccentAutocorrectWeight;
       final confidenceWeight = germanAccentAutocorrectEligible
           ? math.max(entry.weight, minimumAutocorrectWeight)
@@ -848,7 +849,7 @@ class WeightedLexiconLanguageModel
                           (lastAgreement > 0 ? .001 : 0) +
                           (errorPatternBoost > 0 ? .002 : 0) -
                           correctionPenalty * .02 +
-                          (germanAccentBoost > 0 ? .0045 : 0) +
+                          (germanAccentEvidence != null ? .0045 : 0) +
                           correctionAcceptance * .002 +
                           contextBoost.clamp(0, 1) * .003))
                 .clamp(0, .999)

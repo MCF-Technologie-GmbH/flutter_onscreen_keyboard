@@ -148,6 +148,26 @@ void main() {
     expect(result[1].confidence, lessThan(.985));
   });
 
+  test('accent evidence does not overpower a common transposition', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('öffne', 3.55),
+          OnscreenKeyboardLexiconEntry('offen', 4.10),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'offne',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'offen');
+  });
+
   test('tap geometry changes an ambiguous adjacent-key ranking', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {
