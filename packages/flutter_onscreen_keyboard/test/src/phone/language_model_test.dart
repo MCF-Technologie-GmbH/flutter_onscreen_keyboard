@@ -72,6 +72,82 @@ void main() {
     },
   );
 
+  test('German accent evidence outranks a frequent insertion', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('können', 5.38),
+          OnscreenKeyboardLexiconEntry('konnten', 4.14),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'konnen',
+        previousWord: 'wir',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'können');
+    expect(result[1].confidence, greaterThanOrEqualTo(.985));
+    expect(result[1].score - result[2].score, greaterThanOrEqualTo(.5));
+  });
+
+  test('common German accent corrections clear the confidence gate', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('endgültig', 3.26),
+          OnscreenKeyboardLexiconEntry('häufig', 3.197),
+          OnscreenKeyboardLexiconEntry('zuverlässig', 2.866),
+          OnscreenKeyboardLexiconEntry('verfügbar', 2.956),
+        ],
+      },
+    );
+    const cases = <(String, String)>[
+      ('entgultig', 'endgültig'),
+      ('heufig', 'häufig'),
+      ('zuverlassig', 'zuverlässig'),
+      ('verfugbar', 'verfügbar'),
+    ];
+
+    for (final (typed, expected) in cases) {
+      final result = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: const Locale('de'),
+          prefix: typed,
+          cancellationToken: OnscreenKeyboardCancellationToken(),
+        ),
+      );
+      expect(result[1].word, expected, reason: typed);
+      expect(
+        result[1].confidence,
+        greaterThanOrEqualTo(.985),
+        reason: typed,
+      );
+    }
+  });
+
+  test('rare accented words remain suggestion-only', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [OnscreenKeyboardLexiconEntry('rärwort', 1.5)],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'rarwort',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'rärwort');
+    expect(result[1].confidence, lessThan(.985));
+  });
+
   test('tap geometry changes an ambiguous adjacent-key ranking', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {

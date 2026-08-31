@@ -661,6 +661,9 @@ class WeightedLexiconLanguageModel
   final Map<String, OnscreenKeyboardLearningSnapshot> _learning = {};
   final Map<String, Future<void>> _loading = {};
 
+  static const _minimumGermanAccentAutocorrectWeight = 2.7;
+  static const _maximumGermanAccentEvidenceCost = 1.25;
+
   Future<void> _ensureLoaded(Locale locale) async {
     final language = locale.languageCode.toLowerCase();
     await _loading.putIfAbsent(language, () async {
@@ -729,11 +732,11 @@ class WeightedLexiconLanguageModel
         if (entryIndex >= 0) sourceByWord[word] = entries[entryIndex];
       }
     }
+    final centers = {
+      ..._defaultKeyCenters(language),
+      ...request.keyCenters,
+    };
     if (prefix.isNotEmpty) {
-      final centers = {
-        ..._defaultKeyCenters(language),
-        ...request.keyCenters,
-      };
       for (final match in _correctionCandidates(
         language,
         prefix,
@@ -789,7 +792,27 @@ class WeightedLexiconLanguageModel
       final rejection = learned.correctionOutcomes['$prefix\u0000$word'] ?? 0;
       final correctionPenalty = rejection < 0 ? -math.log(1 - rejection) : 0;
       final correctionAcceptance = rejection > 0 ? math.log(1 + rejection) : 0;
-      final errorPatternBoost = _deterministicErrorPatternBoost(prefix, word);
+      final germanAccentEvidence = language == 'de'
+          ? _germanAccentEvidenceCost(
+              prefix,
+              word,
+              request.tapSamples,
+              centers,
+            )
+          : null;
+      final germanAccentBoost = switch (germanAccentEvidence) {
+        0 => 3.2,
+        final cost? when cost <= _maximumGermanAccentEvidenceCost => 1.5,
+        _ => 0.0,
+      };
+      final errorPatternBoost =
+          _deterministicErrorPatternBoost(prefix, word) + germanAccentBoost;
+      final germanAccentAutocorrectEligible =
+          germanAccentBoost > 0 &&
+          entry.weight >= _minimumGermanAccentAutocorrectWeight;
+      final confidenceWeight = germanAccentAutocorrectEligible
+          ? math.max(entry.weight, minimumAutocorrectWeight)
+          : entry.weight;
       final score = begins || prefix.isEmpty
           ? entry.weight +
                 (begins ? 1.2 : 0) +
@@ -812,10 +835,10 @@ class WeightedLexiconLanguageModel
                 correctionAcceptance * .28;
       final correctionConfidence = begins
           ? (0.72 + similarity * .2).clamp(0, 1).toDouble()
-          : (entry.weight < minimumAutocorrectWeight
+          : (confidenceWeight < minimumAutocorrectWeight
                     ? .9
                     : (0.986 +
-                          (entry.weight - minimumAutocorrectWeight).clamp(
+                          (confidenceWeight - minimumAutocorrectWeight).clamp(
                                 0,
                                 3,
                               ) *
@@ -825,6 +848,7 @@ class WeightedLexiconLanguageModel
                           (lastAgreement > 0 ? .001 : 0) +
                           (errorPatternBoost > 0 ? .002 : 0) -
                           correctionPenalty * .02 +
+                          (germanAccentBoost > 0 ? .0045 : 0) +
                           correctionAcceptance * .002 +
                           contextBoost.clamp(0, 1) * .003))
                 .clamp(0, .999)
@@ -838,7 +862,8 @@ class WeightedLexiconLanguageModel
               ? OnscreenKeyboardSuggestionKind.nextWord
               : begins
               ? OnscreenKeyboardSuggestionKind.completion
-              : entry.weight >= minimumAutocorrectWeight
+              : entry.weight >= minimumAutocorrectWeight ||
+                    germanAccentAutocorrectEligible
               ? OnscreenKeyboardSuggestionKind.correction
               : OnscreenKeyboardSuggestionKind.completion,
         ),
@@ -1187,6 +1212,33 @@ class WeightedLexiconLanguageModel
     if (_isRepeatedCharacterRemoval(source, target)) return 1.2;
     if (_isAdjacentTransposition(source, target)) return .8;
     return 0;
+  }
+
+  /// Returns bounded evidence that a German candidate was typed without the
+  /// dedicated umlaut/eszett characters available through long press.
+  ///
+  /// A direct ASCII transliteration is strongest. One additional ordinary
+  /// key error is allowed so common forms such as `entgultig` and `heufig`
+  /// remain correctable, but frequency still controls automatic eligibility.
+  static double? _germanAccentEvidenceCost(
+    String typed,
+    String candidate,
+    List<OnscreenKeyboardTapSample> tapSamples,
+    Map<String, Offset> keyCenters,
+  ) {
+    final asciiCandidate = candidate
+        .replaceAll('ä', 'a')
+        .replaceAll('ö', 'o')
+        .replaceAll('ü', 'u')
+        .replaceAll('ß', 'ss');
+    if (asciiCandidate == candidate) return null;
+    final cost = _weightedWordDistance(
+      typed,
+      asciiCandidate,
+      tapSamples,
+      keyCenters,
+    );
+    return cost <= _maximumGermanAccentEvidenceCost ? cost : null;
   }
 
   static bool _isSingleInsertion(List<String> source, List<String> target) {
