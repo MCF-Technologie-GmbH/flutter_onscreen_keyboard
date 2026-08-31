@@ -820,7 +820,7 @@ class WeightedLexiconLanguageModel
           ? 3.2
           : germanAccentEvidence != null &&
                 entry.weight >= _minimumGermanAccentAutocorrectWeight
-          ? .3
+          ? .5
           : 0.0;
       final errorPatternBoost =
           _deterministicErrorPatternBoost(prefix, word) + germanAccentBoost;
