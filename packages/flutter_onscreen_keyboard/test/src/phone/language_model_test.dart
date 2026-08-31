@@ -130,6 +130,50 @@ void main() {
     }
   });
 
+  test('live geometry keeps häufig above the orthographic runner-up', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('häufig', 3.197),
+          OnscreenKeyboardLexiconEntry('heutig', .477),
+        ],
+      },
+    );
+    const centers = {
+      'e': Offset(.25, .2),
+      'u': Offset(.65, .2),
+      'i': Offset(.75, .2),
+      't': Offset(.45, .2),
+      'a': Offset(.15, .5),
+      'f': Offset(.45, .5),
+      'g': Offset(.55, .5),
+      'h': Offset(.65, .5),
+    };
+    final taps = 'heufig'.characters.indexed
+        .map(
+          (entry) => OnscreenKeyboardTapSample(
+            character: entry.$2,
+            position: centers[entry.$2]!,
+            keyCenter: centers[entry.$2]!,
+            timestamp: Duration(milliseconds: entry.$1 * 70),
+            keyCenters: centers,
+          ),
+        )
+        .toList(growable: false);
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'heufig',
+        tapSamples: taps,
+        keyCenters: centers,
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'häufig');
+    expect(result[1].score - result[2].score, greaterThanOrEqualTo(1.3));
+  });
+
   test('rare accented words remain suggestion-only', () async {
     final model = WeightedLexiconLanguageModel(
       lexicons: const {

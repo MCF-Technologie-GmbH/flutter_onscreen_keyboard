@@ -743,6 +743,13 @@ class WeightedLexiconLanguageModel
       ..._defaultKeyCenters(language),
       ...request.keyCenters,
     };
+    if (language == 'de') {
+      centers
+        ..['ä'] = centers['a']!
+        ..['ö'] = centers['o']!
+        ..['ü'] = centers['u']!
+        ..['ß'] = centers['s']!;
+    }
     if (prefix.isNotEmpty) {
       for (final match in _correctionCandidates(
         language,
@@ -811,6 +818,9 @@ class WeightedLexiconLanguageModel
           germanAccentEvidence == 0 &&
               entry.weight >= _minimumGermanAccentRankingWeight
           ? 3.2
+          : germanAccentEvidence != null &&
+                entry.weight >= _minimumGermanAccentAutocorrectWeight
+          ? .3
           : 0.0;
       final errorPatternBoost =
           _deterministicErrorPatternBoost(prefix, word) + germanAccentBoost;
