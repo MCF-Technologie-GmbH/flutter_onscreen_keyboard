@@ -634,6 +634,27 @@ void main() {
     expect(acceptedModel.rejected, 0);
   });
 
+  testWidgets('tap suggestions receive complete live key geometry', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final model = _SuggestionGeometryLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+    );
+
+    await tester.tap(find.text('h'));
+    await tester.pumpAndSettle();
+
+    expect(model.lastTapSamples, hasLength(1));
+    expect(model.lastKeyCenters.keys, containsAll('qwertyuiop'.split('')));
+    expect(model.lastKeyCenters.keys, containsAll('asdfghjkl'.split('')));
+    expect(model.lastKeyCenters.keys, containsAll('zxcvbnm'.split('')));
+  });
+
   testWidgets('holding space moves the cursor without inserting a space', (
     tester,
   ) async {
@@ -808,6 +829,22 @@ class _TrackingLanguageModel extends _StaticLanguageModel {
     lastPoints = request.points;
     lastKeyCenters = request.keyCenters;
     return super.decodeSwipe(request);
+  }
+}
+
+class _SuggestionGeometryLanguageModel extends _StaticLanguageModel {
+  List<OnscreenKeyboardTapSample> lastTapSamples = const [];
+  Map<String, Offset> lastKeyCenters = const {};
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> suggestions(
+    OnscreenKeyboardSuggestionRequest request,
+  ) async {
+    if (request.tapSamples.isNotEmpty) {
+      lastTapSamples = request.tapSamples;
+      lastKeyCenters = request.keyCenters;
+    }
+    return super.suggestions(request);
   }
 }
 

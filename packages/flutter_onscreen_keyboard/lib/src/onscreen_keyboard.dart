@@ -1260,6 +1260,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
     _keyCenters = {
       ..._keyCenters,
+      ...sample.keyCenters,
       sample.character.toLowerCase(): sample.keyCenter,
     };
     unawaited(_refreshSuggestions());

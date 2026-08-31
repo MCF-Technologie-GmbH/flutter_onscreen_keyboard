@@ -147,6 +147,11 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
             position: _normalize(event.position),
             keyCenter: center,
             timestamp: _downTimestamp ?? event.timeStamp,
+            keyCenters: {
+              for (final entry in _textKeys)
+                if (entry.$1.currentContext case final context?)
+                  entry.$2.primary.toLowerCase(): _centerFromContext(context),
+            },
           ),
         );
       }

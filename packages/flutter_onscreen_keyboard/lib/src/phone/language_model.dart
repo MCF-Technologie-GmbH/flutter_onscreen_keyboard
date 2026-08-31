@@ -92,12 +92,18 @@ class OnscreenKeyboardTapSample {
     required this.position,
     required this.keyCenter,
     required this.timestamp,
+    this.keyCenters = const {},
   });
 
   final String character;
   final Offset position;
   final Offset keyCenter;
   final Duration timestamp;
+
+  /// Live centers for every visible text key in the same coordinate space as
+  /// [position]. Older callers may omit this and provide request geometry
+  /// separately.
+  final Map<String, Offset> keyCenters;
 }
 
 class OnscreenKeyboardRequestCancelled implements Exception {
