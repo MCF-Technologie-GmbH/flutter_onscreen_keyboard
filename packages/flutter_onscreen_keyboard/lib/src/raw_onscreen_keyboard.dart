@@ -23,6 +23,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
     this.onSwipeUpdate,
     this.onSwipeData,
     this.onSwipeDataUpdate,
+    this.onTapSample,
     this.onSpaceCursorMove,
     this.onDeleteWord,
     this.feedback = const OnscreenKeyboardFeedback(),
@@ -46,6 +47,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
   final ValueChanged<List<String>>? onSwipeUpdate;
   final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeData;
   final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeDataUpdate;
+  final ValueChanged<OnscreenKeyboardTapSample>? onTapSample;
   final ValueChanged<int>? onSpaceCursorMove;
   final VoidCallback? onDeleteWord;
   final OnscreenKeyboardFeedback feedback;
@@ -62,14 +64,19 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   final GlobalKey _surfaceKey = GlobalKey();
   int? _pointer;
   Offset? _origin;
+  TextKey? _downKey;
+  Duration? _downTimestamp;
   bool _swiping = false;
+  bool _dragging = false;
   Timer? _swipePreviewTimer;
 
   bool get _hasSwipeHandler =>
       widget.onSwipe != null || widget.onSwipeData != null;
 
   void _pointerDown(PointerDownEvent event) {
-    if (_pointer != null || !_hasSwipeHandler) return;
+    if (_pointer != null || (!_hasSwipeHandler && widget.onTapSample == null)) {
+      return;
+    }
     final key = _hit(event.position);
     if (key == null ||
         !RegExp(r'^\p{L}$', unicode: true).hasMatch(key.primary)) {
@@ -77,7 +84,10 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     }
     _pointer = event.pointer;
     _origin = event.position;
+    _downKey = key;
+    _downTimestamp = event.timeStamp;
     _swiping = false;
+    _dragging = false;
     _trace
       ..clear()
       ..add(key.primary);
@@ -89,6 +99,10 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
 
   void _pointerMove(PointerMoveEvent event) {
     if (_pointer != event.pointer) return;
+    if (!_dragging && (event.position - _origin!).distance >= 12) {
+      _dragging = true;
+    }
+    if (!_hasSwipeHandler) return;
     if (!_swiping && (event.position - _origin!).distance >= 12) {
       _swiping = true;
     }
@@ -124,11 +138,31 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     if (_swiping && _trace.length >= 2) {
       widget.onSwipe?.call(List.unmodifiable(_trace));
       widget.onSwipeData?.call(_snapshot());
+    } else if (_downKey case final key?) {
+      final center = _centerOf(key);
+      if (center != null) {
+        widget.onTapSample?.call(
+          OnscreenKeyboardTapSample(
+            character: key.primary,
+            position: _normalize(event.position),
+            keyCenter: center,
+            timestamp: _downTimestamp ?? event.timeStamp,
+            keyCenters: {
+              for (final entry in _textKeys)
+                if (entry.$1.currentContext case final context?)
+                  entry.$2.primary.toLowerCase(): _centerFromContext(context),
+            },
+          ),
+        );
+      }
     }
     _pointer = null;
     _origin = null;
+    _downKey = null;
+    _downTimestamp = null;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _swiping = false;
+      _dragging = false;
       if (mounted) setState(_points.clear);
     });
   }
@@ -150,15 +184,23 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
     keyCenters: {
       for (final entry in _textKeys)
         if (entry.$1.currentContext case final context?)
-          entry.$2.primary: _normalize(
-            (context.findRenderObject()! as RenderBox).localToGlobal(
-              (context.findRenderObject()! as RenderBox).size.center(
-                Offset.zero,
-              ),
-            ),
-          ),
+          entry.$2.primary: _centerFromContext(context),
     },
   );
+
+  Offset? _centerOf(TextKey key) {
+    for (final entry in _textKeys) {
+      if (!identical(entry.$2, key)) continue;
+      final context = entry.$1.currentContext;
+      if (context != null) return _centerFromContext(context);
+    }
+    return null;
+  }
+
+  Offset _centerFromContext(BuildContext context) {
+    final box = context.findRenderObject()! as RenderBox;
+    return _normalize(box.localToGlobal(box.size.center(Offset.zero)));
+  }
 
   TextKey? _hit(Offset globalPosition) {
     for (final entry in _textKeys) {
@@ -249,9 +291,12 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
         _swipePreviewTimer?.cancel();
         _pointer = null;
         _origin = null;
+        _downKey = null;
+        _downTimestamp = null;
         _trace.clear();
         _points.clear();
         _swiping = false;
+        _dragging = false;
         if (mounted) setState(() {});
       },
       child: KeyedSubtree(
@@ -284,7 +329,7 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
         textKey: key,
         showSecondary: widget.showSecondary,
         feedback: widget.feedback,
-        suppressTap: () => _swiping,
+        suppressTap: () => _swiping || _dragging,
         onAlternate: widget.onAlternate,
         onCursorMove: key.primary == ' ' ? widget.onSpaceCursorMove : null,
         onTapDown: () => widget.onKeyDown(key),

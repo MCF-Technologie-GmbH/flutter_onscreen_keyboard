@@ -42,6 +42,7 @@ class OnscreenKeyboard extends StatefulWidget {
     this.feedback = const OnscreenKeyboardFeedback(),
     this.editingGestures = const OnscreenKeyboardEditingGestures(),
     this.suggestionBarBuilder,
+    this.swipeTypingEnabled = true,
     this.onSwipeDiagnostic,
     this.minimumSwipeConfidence = .48,
     this.minimumSwipeScoreMargin = .12,
@@ -98,7 +99,7 @@ class OnscreenKeyboard extends StatefulWidget {
   final Locale? locale;
 
   /// Optional offline language model.
-  final OnscreenKeyboardLanguageModel? languageModel;
+  final OnscreenKeyboardSuggestionModel? languageModel;
 
   /// Optional field- and locale-aware layout resolver.
   final OnscreenKeyboardLayoutResolver? layoutResolver;
@@ -111,6 +112,12 @@ class OnscreenKeyboard extends StatefulWidget {
 
   /// Optional replacement for the default three-slot suggestion bar.
   final SuggestionBarBuilder? suggestionBarBuilder;
+
+  /// Whether experimental swipe decoding is enabled.
+  ///
+  /// Defaults to `true` for compatibility. Products that do not explicitly
+  /// validate swipe quality should set this to `false`.
+  final bool swipeTypingEnabled;
 
   /// Optional, explicit local diagnostics callback for swipe tuning.
   final ValueChanged<OnscreenKeyboardSwipeDiagnostic>? onSwipeDiagnostic;
@@ -173,12 +180,13 @@ class OnscreenKeyboard extends StatefulWidget {
         OnscreenKeyboardPresentation.floating,
     OnscreenKeyboardTypingMode typingMode = OnscreenKeyboardTypingMode.off,
     Locale? locale,
-    OnscreenKeyboardLanguageModel? languageModel,
+    OnscreenKeyboardSuggestionModel? languageModel,
     OnscreenKeyboardLayoutResolver? layoutResolver,
     OnscreenKeyboardFeedback feedback = const OnscreenKeyboardFeedback(),
     OnscreenKeyboardEditingGestures editingGestures =
         const OnscreenKeyboardEditingGestures(),
     SuggestionBarBuilder? suggestionBarBuilder,
+    bool swipeTypingEnabled = true,
     ValueChanged<OnscreenKeyboardSwipeDiagnostic>? onSwipeDiagnostic,
     double minimumSwipeConfidence = .48,
     double minimumSwipeScoreMargin = .12,
@@ -201,6 +209,7 @@ class OnscreenKeyboard extends StatefulWidget {
       feedback: feedback,
       editingGestures: editingGestures,
       suggestionBarBuilder: suggestionBarBuilder,
+      swipeTypingEnabled: swipeTypingEnabled,
       onSwipeDiagnostic: onSwipeDiagnostic,
       minimumSwipeConfidence: minimumSwipeConfidence,
       minimumSwipeScoreMargin: minimumSwipeScoreMargin,
@@ -244,9 +253,15 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   Locale _locale = const Locale('en');
   late OnscreenKeyboardTypingMode _typingMode = widget.typingMode;
   List<OnscreenKeyboardSuggestion> _suggestions = const [];
+  String? _suggestionPrefix;
   OnscreenKeyboardCancellationToken? _requestToken;
   TextEditingValue? _correctionBefore;
   TextEditingValue? _correctionAfter;
+  String? _correctionOriginal;
+  String? _correctionReplacement;
+  List<String> _correctionPreviousWords = const [];
+  final List<OnscreenKeyboardTapSample> _tapSamples = [];
+  Map<String, Offset> _keyCenters = const {};
   DateTime? _lastSpaceTap;
   TextEditingValue? _swipeBefore;
   TextEditingValue? _swipeAfter;
@@ -281,9 +296,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         widget.typingMode != oldWidget.typingMode ||
         widget.locale != oldWidget.locale ||
         widget.layout != oldWidget.layout ||
-        widget.layoutResolver != oldWidget.layoutResolver) {
+        widget.layoutResolver != oldWidget.layoutResolver ||
+        widget.swipeTypingEnabled != oldWidget.swipeTypingEnabled) {
       _requestToken?.cancel();
       _suggestions = const [];
+      _suggestionPrefix = null;
+      _tapSamples.clear();
+      _keyCenters = const {};
+      if (!widget.swipeTypingEnabled) _clearSwipeUndo();
       _ensureValidMode();
       unawaited(_refreshSuggestions());
     }
@@ -315,8 +335,45 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   void _handleTexTextKeyDown(TextKey key) {
+    _acceptPendingCorrection();
     final text = key.getText(secondary: _showSecondary);
-    final corrected = _isWordBoundary(text) && _maybeApplyCachedCorrection();
+    final isBoundary = _isWordBoundary(text);
+    final field = activeTextField;
+    final boundaryRange = isBoundary && field != null
+        ? _currentWordRange(field.controller.value)
+        : TextRange.empty;
+    final boundaryOriginal = field == null || boundaryRange.isCollapsed
+        ? ''
+        : field.controller.text.substring(
+            boundaryRange.start,
+            boundaryRange.end,
+          );
+    final cachedSuggestionsMatch =
+        boundaryOriginal.isNotEmpty &&
+        _suggestionPrefix?.toLowerCase() == boundaryOriginal.toLowerCase();
+    final corrected = isBoundary && _maybeApplyCachedCorrection();
+    final resolveCorrectionAfterBoundary =
+        isBoundary &&
+        !corrected &&
+        !cachedSuggestionsMatch &&
+        boundaryOriginal.isNotEmpty &&
+        _canRequestBoundaryCorrection(field);
+    final beforeBoundary = resolveCorrectionAfterBoundary
+        ? field!.controller.value
+        : null;
+    final previousWords = resolveCorrectionAfterBoundary
+        ? _wordsBeforeCursor(includeCurrent: false)
+        : const <String>[];
+    final boundaryTapSamples = resolveCorrectionAfterBoundary
+        ? List<OnscreenKeyboardTapSample>.unmodifiable(_tapSamples)
+        : const <OnscreenKeyboardTapSample>[];
+    final boundaryKeyCenters = resolveCorrectionAfterBoundary
+        ? Map<String, Offset>.unmodifiable(_keyCenters)
+        : const <String, Offset>{};
+    if (isBoundary) {
+      _tapSamples.clear();
+      _keyCenters = const {};
+    }
     final handled =
         (text == ' ' && _maybeInsertDoubleSpacePeriod()) ||
         (_isPunctuation(text) && _replaceSpaceWithPunctuation(text));
@@ -331,7 +388,26 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         _pressedActionKeys.remove(ActionKeyType.shift);
       });
     }
-    unawaited(_afterTextInput(text));
+    final afterBoundary = field?.controller.value;
+    if (resolveCorrectionAfterBoundary &&
+        beforeBoundary != null &&
+        afterBoundary != null &&
+        afterBoundary != beforeBoundary) {
+      unawaited(
+        _resolveCorrectionAfterBoundary(
+          field: field!,
+          beforeBoundary: beforeBoundary,
+          afterBoundary: afterBoundary,
+          wordRange: boundaryRange,
+          original: boundaryOriginal,
+          previousWords: previousWords,
+          tapSamples: boundaryTapSamples,
+          keyCenters: boundaryKeyCenters,
+        ),
+      );
+    } else {
+      unawaited(_afterTextInput(text, learnBoundary: !corrected));
+    }
   }
 
   void _insertText(String text, {bool replaceCurrentWord = false}) {
@@ -409,8 +485,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   bool _isWordBoundary(String text) => RegExp(r'^\s|[.,!?;:]$').hasMatch(text);
 
-  Future<void> _afterTextInput(String text) async {
-    if (_isWordBoundary(text)) {
+  Future<void> _afterTextInput(
+    String text, {
+    bool learnBoundary = true,
+  }) async {
+    if (_isWordBoundary(text) && learnBoundary) {
       final words = _wordsBeforeCursor();
       if (words.isNotEmpty &&
           activeTextField!.fieldConfiguration.allowsLearning) {
@@ -448,27 +527,177 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final range = _currentWordRange(field.controller.value);
     if (range.isCollapsed) return false;
     final original = field.controller.text.substring(range.start, range.end);
-    final corrections = _suggestions
+    if (_suggestionPrefix?.toLowerCase() != original.toLowerCase()) {
+      return false;
+    }
+    final candidate = _automaticCorrectionFor(original, _suggestions);
+    if (candidate == null) return false;
+    _correctionOriginal = original;
+    _correctionReplacement = candidate.word;
+    _correctionPreviousWords = _wordsBeforeCursor(includeCurrent: false);
+    _correctionBefore = field.controller.value;
+    _insertText(candidate.word, replaceCurrentWord: true);
+    _correctionAfter = field.controller.value;
+    return true;
+  }
+
+  OnscreenKeyboardSuggestion? _automaticCorrectionFor(
+    String original,
+    List<OnscreenKeyboardSuggestion> suggestions,
+  ) {
+    if (suggestions.any(
+      (suggestion) =>
+          suggestion.kind == OnscreenKeyboardSuggestionKind.typed &&
+          suggestion.exactMatch,
+    )) {
+      return null;
+    }
+    final corrections = suggestions
         .where(
           (suggestion) =>
               suggestion.kind != OnscreenKeyboardSuggestionKind.typed,
         )
         .toList(growable: false);
-    if (corrections.isEmpty) return false;
+    if (corrections.isEmpty) return null;
     final candidate = corrections.first;
     final margin = corrections.length < 2
         ? candidate.score
         : candidate.score - corrections[1].score;
+    final requiredMargin = _locale.languageCode.toLowerCase() == 'de'
+        ? 1.3
+        : 1.7;
     if (candidate.word.toLowerCase() == original.toLowerCase() ||
-        candidate.confidence < .9 ||
-        margin < .35 ||
+        candidate.confidence < .985 ||
+        margin < requiredMargin ||
         !_safeToCorrect(original)) {
-      return false;
+      return null;
     }
-    _correctionBefore = field.controller.value;
-    _insertText(candidate.word, replaceCurrentWord: true);
-    _correctionAfter = field.controller.value;
-    return true;
+    return candidate;
+  }
+
+  bool _canRequestBoundaryCorrection(OnscreenKeyboardFieldState? field) =>
+      _typingMode == OnscreenKeyboardTypingMode.autocorrect &&
+      widget.languageModel != null &&
+      field != null &&
+      field.fieldConfiguration.allowsAutocorrect &&
+      field.fieldConfiguration.allowsSuggestions;
+
+  Future<void> _resolveCorrectionAfterBoundary({
+    required OnscreenKeyboardFieldState field,
+    required TextEditingValue beforeBoundary,
+    required TextEditingValue afterBoundary,
+    required TextRange wordRange,
+    required String original,
+    required List<String> previousWords,
+    required List<OnscreenKeyboardTapSample> tapSamples,
+    required Map<String, Offset> keyCenters,
+  }) async {
+    final model = widget.languageModel;
+    if (model == null) return;
+    _requestToken?.cancel();
+    final token = OnscreenKeyboardCancellationToken();
+    _requestToken = token;
+    try {
+      final result = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: _locale,
+          prefix: original,
+          previousWord: previousWords.isEmpty ? null : previousWords.last,
+          previousPreviousWord: previousWords.length < 2
+              ? null
+              : previousWords[previousWords.length - 2],
+          tapSamples: tapSamples,
+          keyCenters: keyCenters,
+          cancellationToken: token,
+        ),
+      );
+      if (!mounted ||
+          token.isCancelled ||
+          token != _requestToken ||
+          activeTextField != field ||
+          field.controller.value != afterBoundary) {
+        return;
+      }
+      final candidate = _automaticCorrectionFor(original, result);
+      if (candidate == null) {
+        await _afterTextInput(' ');
+        return;
+      }
+      _correctionOriginal = original;
+      _correctionReplacement = candidate.word;
+      _correctionPreviousWords = previousWords;
+      _correctionBefore = beforeBoundary;
+      if (!_replaceRange(wordRange.start, wordRange.end, candidate.word)) {
+        await _afterTextInput(' ');
+        return;
+      }
+      final boundaryLength =
+          afterBoundary.text.length - beforeBoundary.text.length;
+      field.controller.selection = TextSelection.collapsed(
+        offset: wordRange.start + candidate.word.length + boundaryLength,
+      );
+      _correctionAfter = field.controller.value;
+      await _refreshSuggestions();
+    } on OnscreenKeyboardRequestCancelled {
+      // A later key press superseded this boundary correction.
+    }
+  }
+
+  void _acceptPendingCorrection() {
+    final original = _correctionOriginal;
+    final replacement = _correctionReplacement;
+    final field = activeTextField;
+    if (original == null || replacement == null || field == null) return;
+    if (field.controller.value == _correctionAfter &&
+        field.fieldConfiguration.allowsLearning) {
+      final model = widget.languageModel;
+      switch (model) {
+        case final OnscreenKeyboardCorrectionLearningModel correctionModel:
+          unawaited(
+            correctionModel.recordCorrectionOutcome(
+              locale: _locale,
+              original: original,
+              replacement: replacement,
+              accepted: true,
+            ),
+          );
+      }
+      switch (model) {
+        case final OnscreenKeyboardContextLanguageModel contextModel:
+          unawaited(
+            contextModel.learnAcceptedContext(
+              locale: _locale,
+              word: replacement,
+              previousWord: _correctionPreviousWords.isEmpty
+                  ? null
+                  : _correctionPreviousWords.last,
+              previousPreviousWord: _correctionPreviousWords.length < 2
+                  ? null
+                  : _correctionPreviousWords[_correctionPreviousWords.length -
+                        2],
+            ),
+          );
+        default:
+          unawaited(
+            model?.learnAcceptedWord(
+              locale: _locale,
+              word: replacement,
+              previousWord: _correctionPreviousWords.isEmpty
+                  ? null
+                  : _correctionPreviousWords.last,
+            ),
+          );
+      }
+    }
+    _clearCorrectionUndo();
+  }
+
+  void _clearCorrectionUndo() {
+    _correctionBefore = null;
+    _correctionAfter = null;
+    _correctionOriginal = null;
+    _correctionReplacement = null;
+    _correctionPreviousWords = const [];
   }
 
   bool _safeToCorrect(String word) =>
@@ -716,6 +945,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       _locale = locale;
       _ensureValidMode();
       _suggestions = const [];
+      _suggestionPrefix = null;
     });
     unawaited(_refreshSuggestions());
   }
@@ -732,7 +962,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (_typingMode == mode) return;
     setState(() {
       _typingMode = mode;
-      if (mode == OnscreenKeyboardTypingMode.off) _suggestions = const [];
+      if (mode == OnscreenKeyboardTypingMode.off) {
+        _suggestions = const [];
+        _suggestionPrefix = null;
+      }
     });
     unawaited(_refreshSuggestions());
   }
@@ -746,10 +979,25 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       return false;
     }
     final before = _correctionBefore!;
+    final original = _correctionOriginal;
+    final replacement = _correctionReplacement;
     controller.value = before;
     activeTextField?.onChanged?.call(before.text);
-    _correctionBefore = null;
-    _correctionAfter = null;
+    if (original != null &&
+        replacement != null &&
+        widget.languageModel is OnscreenKeyboardCorrectionLearningModel &&
+        (activeTextField?.fieldConfiguration.allowsLearning ?? false)) {
+      unawaited(
+        (widget.languageModel! as OnscreenKeyboardCorrectionLearningModel)
+            .recordCorrectionOutcome(
+              locale: _locale,
+              original: original,
+              replacement: replacement,
+              accepted: false,
+            ),
+      );
+    }
+    _clearCorrectionUndo();
     unawaited(_refreshSuggestions());
     return true;
   }
@@ -788,10 +1036,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     OnscreenKeyboardSuggestion suggestion,
   ) async {
     final model = widget.languageModel;
-    if (model == null || model is! OnscreenKeyboardPersonalizationModel) {
+    if (model == null ||
+        model is! OnscreenKeyboardSuggestionPersonalizationModel) {
       return;
     }
-    await (model as OnscreenKeyboardPersonalizationModel).forgetWord(
+    await (model as OnscreenKeyboardSuggestionPersonalizationModel).forgetWord(
       locale: _locale,
       word: suggestion.word,
     );
@@ -804,8 +1053,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final base = controller.selection.extentOffset;
     final target = (base + characters).clamp(0, controller.text.length);
     controller.selection = TextSelection.collapsed(offset: target);
-    _correctionBefore = null;
-    _correctionAfter = null;
+    _clearCorrectionUndo();
     _clearSwipeUndo();
     unawaited(_refreshSuggestions());
   }
@@ -829,8 +1077,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
     if (start == end) start--;
     _replaceRange(start, end, '');
-    _correctionBefore = null;
-    _correctionAfter = null;
+    _clearCorrectionUndo();
     _clearSwipeUndo();
     unawaited(_refreshSuggestions());
   }
@@ -860,6 +1107,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       _activeTextField.value = null;
       _requestToken?.cancel();
       _suggestions = const [];
+      _suggestionPrefix = null;
     }
   }
 
@@ -947,6 +1195,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         field == null ||
         _typingMode == OnscreenKeyboardTypingMode.off ||
         !field.fieldConfiguration.allowsSuggestions) {
+      _suggestionPrefix = null;
       if (mounted && _suggestions.isNotEmpty) {
         setState(() => _suggestions = const []);
       }
@@ -966,11 +1215,16 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           previousPreviousWord: words.length < 2
               ? null
               : words[words.length - 2],
+          tapSamples: List.unmodifiable(_tapSamples),
+          keyCenters: _keyCenters,
           cancellationToken: token,
         ),
       );
       if (!mounted || token.isCancelled || token != _requestToken) return;
-      setState(() => _suggestions = result);
+      setState(() {
+        _suggestions = result;
+        _suggestionPrefix = prefix;
+      });
     } on OnscreenKeyboardRequestCancelled {
       // A newer edit superseded this request.
     }
@@ -985,8 +1239,32 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       );
 
   bool get _swipeEnabled =>
+      widget.swipeTypingEnabled &&
       _typingMode != OnscreenKeyboardTypingMode.off &&
-      (activeTextField?.fieldConfiguration.allowsSuggestions ?? false);
+      (activeTextField?.fieldConfiguration.allowsSuggestions ?? false) &&
+      widget.languageModel is OnscreenKeyboardSwipeModel;
+
+  void _handleTapSample(OnscreenKeyboardTapSample sample) {
+    final field = activeTextField;
+    if (field == null ||
+        _typingMode == OnscreenKeyboardTypingMode.off ||
+        !field.fieldConfiguration.allowsSuggestions) {
+      return;
+    }
+    final range = _currentWordRange(field.controller.value);
+    final prefix = field.controller.text.substring(range.start, range.end);
+    if (prefix.isEmpty) return;
+    _tapSamples.add(sample);
+    if (_tapSamples.length > prefix.characters.length) {
+      _tapSamples.removeRange(0, _tapSamples.length - prefix.characters.length);
+    }
+    _keyCenters = {
+      ..._keyCenters,
+      ...sample.keyCenters,
+      sample.character.toLowerCase(): sample.keyCenter,
+    };
+    unawaited(_refreshSuggestions());
+  }
 
   Future<void> _handleSwipeData(OnscreenKeyboardSwipeData data) => _decodeSwipe(
     data.trace,
@@ -1003,18 +1281,22 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }) async {
     final model = widget.languageModel;
     final field = activeTextField;
-    if (model == null ||
-        field == null ||
+    if (field == null ||
         _typingMode == OnscreenKeyboardTypingMode.off ||
         !field.fieldConfiguration.allowsSuggestions) {
       return;
     }
+    final swipeModel = switch (model) {
+      final OnscreenKeyboardSwipeModel value => value,
+      _ => null,
+    };
+    if (swipeModel == null) return;
     _requestToken?.cancel();
     final token = OnscreenKeyboardCancellationToken();
     _requestToken = token;
     final words = _wordsBeforeCursor(includeCurrent: false);
     try {
-      final result = await model.decodeSwipe(
+      final result = await swipeModel.decodeSwipe(
         OnscreenKeyboardSwipeRequest(
           locale: _locale,
           trace: trace,
@@ -1069,9 +1351,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     _insertText('${suggestion.word} ', replaceCurrentWord: true);
     if (isSwipeAlternative &&
         _lastSwipeGesture != null &&
-        widget.languageModel is OnscreenKeyboardPersonalizationModel) {
+        widget.languageModel is OnscreenKeyboardSwipeLearningModel) {
       unawaited(
-        (widget.languageModel! as OnscreenKeyboardPersonalizationModel)
+        (widget.languageModel! as OnscreenKeyboardSwipeLearningModel)
             .learnSwipeGesture(
               locale: _locale,
               word: suggestion.word,
@@ -1262,6 +1544,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                       onDeleteWord: widget.editingGestures.wordDelete
                           ? _deletePreviousWord
                           : null,
+                      onTapSample: _handleTapSample,
                       onSwipeData: _swipeEnabled ? _handleSwipeData : null,
                       onSwipeDataUpdate: _swipeEnabled
                           ? _previewSwipeData
@@ -1475,6 +1758,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                                                         .wordDelete
                                                     ? _deletePreviousWord
                                                     : null,
+                                                onTapSample: _handleTapSample,
                                                 onSwipeData: _swipeEnabled
                                                     ? _handleSwipeData
                                                     : null,

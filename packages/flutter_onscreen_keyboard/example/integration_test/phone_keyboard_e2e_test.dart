@@ -51,6 +51,29 @@ void main() {
     expect(_alternatePopover, findsNothing);
   });
 
+  testWidgets('disabled swipe drag produces neither a trace nor text', (
+    tester,
+  ) async {
+    await _startPlayground(tester);
+    final field = find.byKey(const ValueKey('typing-and-return-field'));
+    await tester.tap(find.byTooltip('Disable experimental swipe'));
+    await tester.pumpAndSettle();
+    final gesture = await tester.startGesture(
+      _keyCenter(tester, 'h'),
+      // Kept explicit: this scenario verifies the touch pointer path.
+      // ignore: avoid_redundant_argument_values
+      kind: PointerDeviceKind.touch,
+    );
+    await gesture.moveTo(_keyCenter(tester, 'e'));
+    await gesture.moveTo(_keyCenter(tester, 'l'));
+    await gesture.moveTo(_keyCenter(tester, 'o'));
+    await tester.pump(const Duration(milliseconds: 40));
+    await gesture.up();
+    await tester.pump();
+
+    expect(_textOf(tester, field), isEmpty);
+  });
+
   testWidgets('touch hold repeats backspace and stops immediately on release', (
     tester,
   ) async {
@@ -77,6 +100,28 @@ void main() {
     expect(releasedText.length, lessThan(9));
     expect(_textOf(tester, field), releasedText);
     expect(_keyPreview, findsNothing);
+  });
+
+  testWidgets('autocorrect commits at a boundary and Backspace rejects it', (
+    tester,
+  ) async {
+    await _startPlayground(tester);
+    final field = find.byKey(const ValueKey('typing-and-return-field'));
+    OnscreenKeyboard.of(
+      tester.element(field),
+    ).setTypingMode(OnscreenKeyboardTypingMode.autocorrect);
+    for (final letter in 'helo'.characters) {
+      await tester.tap(_key(letter));
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump(const Duration(milliseconds: 80));
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.pump();
+    expect(_textOf(tester, field), 'hello ');
+
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
+    expect(_textOf(tester, field), 'helo');
   });
 
   testWidgets('Shift Caps Lock and Return work through the rendered keyboard', (

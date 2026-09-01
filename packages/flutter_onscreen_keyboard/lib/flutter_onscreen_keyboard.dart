@@ -36,6 +36,7 @@ export 'src/onscreen_keyboard.dart'
         OnscreenKeyboardController,
         OnscreenKeyboardTextField,
         OnscreenKeyboardTextFormField;
+export 'src/phone/context_codec.dart';
 export 'src/phone/language_model.dart';
 export 'src/phone/lexicon_codec.dart';
 export 'src/phone/typing.dart';

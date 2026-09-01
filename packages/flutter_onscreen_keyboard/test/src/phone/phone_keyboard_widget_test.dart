@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -475,6 +477,30 @@ void main() {
     expect(languageModel.lastKeyCenters, contains('h'));
   });
 
+  testWidgets('swipe-disabled drags produce no trace and no text', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final languageModel = _TrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: languageModel,
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+      swipeTypingEnabled: false,
+    );
+    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
+    await gesture.moveTo(tester.getCenter(find.text('e')));
+    await gesture.moveTo(tester.getCenter(find.text('l')));
+    await gesture.moveTo(tester.getCenter(find.text('o')));
+    await tester.pump(const Duration(milliseconds: 40));
+    await gesture.up();
+    await tester.pump();
+
+    expect(languageModel.decodeCount, 0);
+    expect(controller.text, isEmpty);
+  });
+
   testWidgets('phone keys stay compact and backspace is in the top row', (
     tester,
   ) async {
@@ -526,6 +552,107 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.backspace_outlined));
     expect(controller.text, 'helo');
+  });
+
+  testWidgets('boundary waits for the current asynchronous correction', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final model = _DelayedLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    expect(controller.text, 'helo ');
+    model.complete();
+    await tester.pump();
+    expect(controller.text, 'hello ');
+
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    expect(controller.text, 'helo');
+  });
+
+  testWidgets('later input cancels a pending boundary correction', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final model = _DelayedLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.tap(find.text('w'));
+    expect(controller.text, 'helo w');
+    model.complete();
+    await tester.pump();
+    expect(controller.text, 'helo w');
+  });
+
+  testWidgets('correction learning waits for continuation and records undo', (
+    tester,
+  ) async {
+    final rejectedController = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final rejectedModel = _CorrectionTrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: rejectedController,
+      languageModel: rejectedModel,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    expect(rejectedModel.accepted, 0);
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
+    expect(rejectedModel.rejected, 1);
+
+    final acceptedController = TextEditingController(text: 'helo')
+      ..selection = const TextSelection.collapsed(offset: 4);
+    final acceptedModel = _CorrectionTrackingLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: acceptedController,
+      languageModel: acceptedModel,
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.tap(find.text('w'));
+    await tester.pump();
+    expect(acceptedModel.accepted, 1);
+    expect(acceptedModel.rejected, 0);
+  });
+
+  testWidgets('tap suggestions receive complete live key geometry', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final model = _SuggestionGeometryLanguageModel();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: model,
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+    );
+
+    await tester.tap(find.text('h'));
+    await tester.pumpAndSettle();
+
+    expect(model.lastTapSamples, hasLength(1));
+    expect(model.lastKeyCenters.keys, containsAll('qwertyuiop'.split('')));
+    expect(model.lastKeyCenters.keys, containsAll('asdfghjkl'.split('')));
+    expect(model.lastKeyCenters.keys, containsAll('zxcvbnm'.split('')));
   });
 
   testWidgets('holding space moves the cursor without inserting a space', (
@@ -634,6 +761,7 @@ Future<void> _pumpKeyboard(
   TextInputAction? textInputAction,
   int? minLines,
   int? maxLines = 1,
+  bool swipeTypingEnabled = true,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -641,6 +769,7 @@ Future<void> _pumpKeyboard(
         presentation: OnscreenKeyboardPresentation.docked,
         languageModel: languageModel,
         typingMode: typingMode,
+        swipeTypingEnabled: swipeTypingEnabled,
         feedback: const OnscreenKeyboardFeedback(enableHaptics: false),
         child: Scaffold(
           body: OnscreenKeyboardTextField(
@@ -701,6 +830,56 @@ class _TrackingLanguageModel extends _StaticLanguageModel {
     lastKeyCenters = request.keyCenters;
     return super.decodeSwipe(request);
   }
+}
+
+class _SuggestionGeometryLanguageModel extends _StaticLanguageModel {
+  List<OnscreenKeyboardTapSample> lastTapSamples = const [];
+  Map<String, Offset> lastKeyCenters = const {};
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> suggestions(
+    OnscreenKeyboardSuggestionRequest request,
+  ) async {
+    if (request.tapSamples.isNotEmpty) {
+      lastTapSamples = request.tapSamples;
+      lastKeyCenters = request.keyCenters;
+    }
+    return super.suggestions(request);
+  }
+}
+
+class _CorrectionTrackingLanguageModel extends _StaticLanguageModel
+    implements OnscreenKeyboardCorrectionLearningModel {
+  int accepted = 0;
+  int rejected = 0;
+
+  @override
+  Future<void> recordCorrectionOutcome({
+    required Locale locale,
+    required String original,
+    required String replacement,
+    required bool accepted,
+  }) async {
+    if (accepted) {
+      this.accepted++;
+    } else {
+      rejected++;
+    }
+  }
+}
+
+class _DelayedLanguageModel extends _StaticLanguageModel {
+  final _completer = Completer<List<OnscreenKeyboardSuggestion>>();
+
+  void complete() => _completer.complete(const [
+    OnscreenKeyboardSuggestion(word: 'hello', score: 10, confidence: .99),
+    OnscreenKeyboardSuggestion(word: 'help', score: 8, confidence: .8),
+  ]);
+
+  @override
+  Future<List<OnscreenKeyboardSuggestion>> suggestions(
+    OnscreenKeyboardSuggestionRequest request,
+  ) => _completer.future;
 }
 
 class _LowConfidenceLanguageModel extends _StaticLanguageModel {

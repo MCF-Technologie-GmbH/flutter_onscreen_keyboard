@@ -21,6 +21,7 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
   OnscreenKeyboardTypingMode _typingMode =
       OnscreenKeyboardTypingMode.suggestions;
   OnscreenKeyboardSwipeDiagnostic? _lastSwipeDiagnostic;
+  bool _swipeTypingEnabled = true;
 
   late final OnscreenKeyboardLanguageModel _languageModel =
       _dictionaryRoot.isNotEmpty
@@ -44,9 +45,12 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
   static Iterable<OnscreenKeyboardLexiconEntry> _entries(String words) sync* {
     final values = words.split(' ');
     for (var index = 0; index < values.length; index++) {
+      final word = values[index];
       yield OnscreenKeyboardLexiconEntry(
-        values[index],
-        (values.length - index) / values.length,
+        word,
+        word == 'hello' || word == 'hallo'
+            ? 10
+            : (values.length - index) / values.length,
       );
     }
   }
@@ -69,6 +73,7 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
         typingMode: _typingMode,
         locale: _locale,
         languageModel: _languageModel,
+        swipeTypingEnabled: _swipeTypingEnabled,
         onSwipeDiagnostic: (diagnostic) =>
             setState(() => _lastSwipeDiagnostic = diagnostic),
         child: child!,
@@ -77,8 +82,11 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
         locale: _locale,
         typingMode: _typingMode,
         swipeDiagnostic: _lastSwipeDiagnostic,
+        swipeTypingEnabled: _swipeTypingEnabled,
         onLocaleChanged: (locale) => setState(() => _locale = locale),
         onTypingModeChanged: (mode) => setState(() => _typingMode = mode),
+        onSwipeTypingChanged: (value) =>
+            setState(() => _swipeTypingEnabled = value),
       ),
     );
   }
@@ -89,16 +97,20 @@ class PlaygroundScreen extends StatelessWidget {
     required this.locale,
     required this.typingMode,
     required this.swipeDiagnostic,
+    required this.swipeTypingEnabled,
     required this.onLocaleChanged,
     required this.onTypingModeChanged,
+    required this.onSwipeTypingChanged,
     super.key,
   });
 
   final Locale locale;
   final OnscreenKeyboardTypingMode typingMode;
   final OnscreenKeyboardSwipeDiagnostic? swipeDiagnostic;
+  final bool swipeTypingEnabled;
   final ValueChanged<Locale> onLocaleChanged;
   final ValueChanged<OnscreenKeyboardTypingMode> onTypingModeChanged;
+  final ValueChanged<bool> onSwipeTypingChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +118,17 @@ class PlaygroundScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Phone Keyboard Playground'),
         actions: [
+          IconButton(
+            tooltip: swipeTypingEnabled
+                ? 'Disable experimental swipe'
+                : 'Enable experimental swipe',
+            onPressed: () => onSwipeTypingChanged(!swipeTypingEnabled),
+            icon: Icon(
+              swipeTypingEnabled
+                  ? Icons.gesture_rounded
+                  : Icons.pan_tool_alt_outlined,
+            ),
+          ),
           IconButton(
             tooltip: 'Hide keyboard',
             onPressed: OnscreenKeyboard.of(context).hide,
@@ -118,7 +141,8 @@ class PlaygroundScreen extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         children: [
           const Text(
-            'Tap a field, type or swipe across letters, hold a key for an '
+            'Tap a field, type, optionally try the experimental swipe '
+            'compatibility API, hold a key for an '
             'alternate, and hold backspace to repeat.',
           ),
           const SizedBox(height: 8),
@@ -177,6 +201,15 @@ class PlaygroundScreen extends StatelessWidget {
                     onTypingModeChanged(values.single),
               ),
             ],
+          ),
+          const SizedBox(height: 20),
+          SwitchListTile(
+            key: const ValueKey('experimental-swipe-toggle'),
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Experimental swipe compatibility'),
+            subtitle: const Text('Disabled in Tap.X production builds'),
+            value: swipeTypingEnabled,
+            onChanged: onSwipeTypingChanged,
           ),
           const SizedBox(height: 20),
           _SwipeDiagnosticsCard(diagnostic: swipeDiagnostic),
@@ -280,13 +313,13 @@ class _SwipeDiagnosticsCardState extends State<_SwipeDiagnosticsCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Swipe accuracy lab',
+              'Experimental swipe compatibility lab',
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 6),
             Text(
               diagnostic == null
-                  ? 'Swipe a word to inspect decoder scores.'
+                  ? 'Experimental: swipe a word to inspect decoder scores.'
                   : '${diagnostic.elapsed.inMicroseconds / 1000} ms · '
                         '$candidates',
             ),

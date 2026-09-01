@@ -28,6 +28,290 @@ void main() {
     expect(result[1].confidence, greaterThan(.8));
   });
 
+  test(
+    'supports transpositions, repeated letters, and missing accents',
+    () async {
+      final model = WeightedLexiconLanguageModel(
+        lexicons: const {
+          'en': [
+            OnscreenKeyboardLexiconEntry('hello', 10),
+            OnscreenKeyboardLexiconEntry('shell', 8),
+          ],
+          'de': [
+            OnscreenKeyboardLexiconEntry('über', 9),
+            OnscreenKeyboardLexiconEntry('aber', 8),
+          ],
+        },
+      );
+
+      final transposed = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: const Locale('en'),
+          prefix: 'hlelo',
+          cancellationToken: OnscreenKeyboardCancellationToken(),
+        ),
+      );
+      final repeated = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: const Locale('en'),
+          prefix: 'helllo',
+          cancellationToken: OnscreenKeyboardCancellationToken(),
+        ),
+      );
+      final accent = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: const Locale('de'),
+          prefix: 'uber',
+          cancellationToken: OnscreenKeyboardCancellationToken(),
+        ),
+      );
+
+      expect(transposed[1].word, 'hello');
+      expect(repeated[1].word, 'hello');
+      expect(accent[1].word, 'über');
+    },
+  );
+
+  test('German accent evidence outranks a frequent insertion', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('können', 5.38),
+          OnscreenKeyboardLexiconEntry('konnten', 4.14),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'konnen',
+        previousWord: 'wir',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'können');
+    expect(result[1].confidence, greaterThanOrEqualTo(.985));
+    expect(result[1].score - result[2].score, greaterThanOrEqualTo(.5));
+  });
+
+  test('common German accent corrections clear the confidence gate', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('endgültig', 3.26),
+          OnscreenKeyboardLexiconEntry('häufig', 3.197),
+          OnscreenKeyboardLexiconEntry('zuverlässig', 2.866),
+          OnscreenKeyboardLexiconEntry('verfügbar', 2.956),
+        ],
+      },
+    );
+    const cases = <(String, String)>[
+      ('entgultig', 'endgültig'),
+      ('heufig', 'häufig'),
+      ('zuverlassig', 'zuverlässig'),
+      ('verfugbar', 'verfügbar'),
+    ];
+
+    for (final (typed, expected) in cases) {
+      final result = await model.suggestions(
+        OnscreenKeyboardSuggestionRequest(
+          locale: const Locale('de'),
+          prefix: typed,
+          cancellationToken: OnscreenKeyboardCancellationToken(),
+        ),
+      );
+      expect(result[1].word, expected, reason: typed);
+      expect(
+        result[1].confidence,
+        greaterThanOrEqualTo(.985),
+        reason: typed,
+      );
+    }
+  });
+
+  test('live geometry keeps häufig above the orthographic runner-up', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('häufig', 3.197),
+          OnscreenKeyboardLexiconEntry('heutig', .477),
+        ],
+      },
+    );
+    const centers = {
+      'e': Offset(.25, .2),
+      'u': Offset(.65, .2),
+      'i': Offset(.75, .2),
+      't': Offset(.45, .2),
+      'a': Offset(.15, .5),
+      'f': Offset(.45, .5),
+      'g': Offset(.55, .5),
+      'h': Offset(.65, .5),
+    };
+    final taps = 'heufig'.characters.indexed
+        .map(
+          (entry) => OnscreenKeyboardTapSample(
+            character: entry.$2,
+            position: centers[entry.$2]!,
+            keyCenter: centers[entry.$2]!,
+            timestamp: Duration(milliseconds: entry.$1 * 70),
+            keyCenters: centers,
+          ),
+        )
+        .toList(growable: false);
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'heufig',
+        tapSamples: taps,
+        keyCenters: centers,
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'häufig');
+    expect(result[1].score - result[2].score, greaterThanOrEqualTo(1.3));
+  });
+
+  test('rare accented words remain suggestion-only', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [OnscreenKeyboardLexiconEntry('rärwort', 1.5)],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'rarwort',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'rärwort');
+    expect(result[1].confidence, lessThan(.985));
+  });
+
+  test('accent evidence does not overpower a common transposition', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'de': [
+          OnscreenKeyboardLexiconEntry('öffne', 3.55),
+          OnscreenKeyboardLexiconEntry('offen', 4.10),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'offne',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'offen');
+  });
+
+  test('tap geometry changes an ambiguous adjacent-key ranking', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('cat', 7),
+          OnscreenKeyboardLexiconEntry('vat', 7),
+        ],
+      },
+    );
+    const centers = {
+      'c': Offset(.3, .8),
+      'v': Offset(.4, .8),
+      'x': Offset(.2, .8),
+      'a': Offset(.1, .5),
+      't': Offset(.45, .2),
+    };
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: 'xat',
+        keyCenters: centers,
+        tapSamples: const [
+          OnscreenKeyboardTapSample(
+            character: 'x',
+            position: Offset(.31, .8),
+            keyCenter: Offset(.2, .8),
+            timestamp: Duration.zero,
+          ),
+        ],
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'cat');
+  });
+
+  test('missing-key evidence outranks an unrelated frequent edit', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('deena', 10),
+          OnscreenKeyboardLexiconEntry('depend', 8),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: 'deend',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result[1].word, 'depend');
+    expect(result[1].confidence, greaterThanOrEqualTo(.985));
+  });
+
+  test('marks exact words and German compounds as valid input', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('rareword', 1),
+          OnscreenKeyboardLexiconEntry('password', 10),
+        ],
+        'de': [
+          OnscreenKeyboardLexiconEntry('haus', 9),
+          OnscreenKeyboardLexiconEntry('tür', 8),
+          OnscreenKeyboardLexiconEntry('vor', 10),
+          OnscreenKeyboardLexiconEntry('raus', 9),
+        ],
+      },
+    );
+    final exact = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: 'rareword',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+    final compound = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'haustür',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(exact.first.exactMatch, isTrue);
+    expect(compound.first.exactMatch, isTrue);
+
+    final plausibleMisspelling = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('de'),
+        prefix: 'vorraus',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+    expect(plausibleMisspelling.first.exactMatch, isFalse);
+  });
+
   test('accepts a lexicon prepared off the UI isolate', () async {
     final model = WeightedLexiconLanguageModel.prepared(
       lexicons: {
@@ -178,6 +462,65 @@ void main() {
 
     expect(result.first.word, 'now');
     expect(result.first.kind, OnscreenKeyboardSuggestionKind.nextWord);
+  });
+
+  test('static trigram context ranks and proposes next words', () async {
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('now', 7),
+          OnscreenKeyboardLexiconEntry('please', 7.2),
+        ],
+      },
+      contexts: {
+        'en': [
+          OnscreenKeyboardContextEntry(
+            words: const ['do', 'it', 'now'],
+            weight: 3,
+          ),
+        ],
+      },
+    );
+    final result = await model.suggestions(
+      OnscreenKeyboardSuggestionRequest(
+        locale: const Locale('en'),
+        prefix: '',
+        previousWord: 'it',
+        previousPreviousWord: 'do',
+        cancellationToken: OnscreenKeyboardCancellationToken(),
+      ),
+    );
+
+    expect(result.first.word, 'now');
+  });
+
+  test('rejected corrections are persisted, bounded, and demoted', () async {
+    final store = _MemoryLearningStore();
+    final model = WeightedLexiconLanguageModel(
+      lexicons: const {
+        'en': [
+          OnscreenKeyboardLexiconEntry('hello', 10),
+          OnscreenKeyboardLexiconEntry('help', 9),
+        ],
+      },
+      learningStore: store,
+      maximumCorrectionOutcomes: 1,
+    );
+    await model.recordCorrectionOutcome(
+      locale: const Locale('en'),
+      original: 'helo',
+      replacement: 'hello',
+      accepted: false,
+    );
+    await model.recordCorrectionOutcome(
+      locale: const Locale('en'),
+      original: 'wrold',
+      replacement: 'world',
+      accepted: false,
+    );
+
+    expect(store.snapshot.correctionOutcomes, hasLength(1));
+    expect(store.snapshot.correctionOutcomes.values.single, -1);
   });
 
   test('forgotten candidates remain suppressed until accepted again', () async {

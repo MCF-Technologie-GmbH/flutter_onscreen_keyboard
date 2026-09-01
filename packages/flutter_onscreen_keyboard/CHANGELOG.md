@@ -1,3 +1,19 @@
+## 0.6.0-mcf.1
+
+- Add a deterministic compact-trie autocorrect search with weighted edits,
+  transpositions, accents, keyboard geometry, and optional tap samples.
+- Split suggestion and experimental swipe capabilities while retaining the
+  aggregate language-model interface for source compatibility.
+- Add runtime-updateable `swipeTypingEnabled`; its compatibility default is
+  `true`.
+- Add compact static bigram/trigram context models and accepted/rejected
+  correction learning.
+- Raise automatic replacement to calibrated high-confidence and
+  language-specific score-margin gates; immediate Backspace records rejection
+  and accepted corrections are learned only after continued input.
+- Prefer deterministic missing-key, repeat-key, and transposition evidence over
+  unrelated frequency-only correction candidates.
+
 ## 0.5.0-mcf.1
 
 - Add an opt-in docked presentation with animated viewport insets and reduced-motion support.
