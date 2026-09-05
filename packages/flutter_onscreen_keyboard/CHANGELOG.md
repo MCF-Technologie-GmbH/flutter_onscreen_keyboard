@@ -1,3 +1,18 @@
+## 0.7.0-mcf.1
+
+- Shift: two taps within one second toggle caps lock (`shiftDoubleTapWindow`);
+  leaving caps lock never seeds the next double tap.
+- Shift: holding the key types capitals until it is released; the release is
+  not counted as a tap.
+- Caps lock is visually distinct from a momentary shift: pressed colours plus a
+  lock bar, themable via `ActionKeyThemeData.capsLockBackgroundColor` and
+  `capsLockForegroundColor`.
+- Automatic one-shot shift at the start of a language field, after sentence
+  punctuation and after a newline, only while a typing mode other than `off` is
+  active. Swiped and accepted words honour the armed shift.
+- Long-press accent alternates are drawn larger (64x76 cells, headline text).
+- Add `clock` as a dependency so the shift double-tap follows the test clock.
+
 ## 0.6.0-mcf.1
 
 - Add a deterministic compact-trie autocorrect search with weighted edits,

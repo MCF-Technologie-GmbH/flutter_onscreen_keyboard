@@ -341,6 +341,8 @@ class ActionKeyThemeData extends KeyThemeData {
     super.boxShadow,
     super.gradient,
     this.textStyle,
+    this.capsLockBackgroundColor,
+    this.capsLockForegroundColor,
   });
 
   /// Background color of the key when pressed.
@@ -348,6 +350,14 @@ class ActionKeyThemeData extends KeyThemeData {
 
   /// Text or icon color of the key when pressed.
   final Color? pressedForegroundColor;
+
+  /// Background color of the shift key while caps lock is on. Falls back to
+  /// [pressedBackgroundColor].
+  final Color? capsLockBackgroundColor;
+
+  /// Icon color of the shift key while caps lock is on. Falls back to
+  /// [pressedForegroundColor].
+  final Color? capsLockForegroundColor;
 
   /// The text style used for action-key labels such as `?123` and `EN`.
   final TextStyle? textStyle;
@@ -367,6 +377,8 @@ class ActionKeyThemeData extends KeyThemeData {
     Color? pressedBackgroundColor,
     Color? pressedForegroundColor,
     TextStyle? textStyle,
+    Color? capsLockBackgroundColor,
+    Color? capsLockForegroundColor,
   }) {
     return ActionKeyThemeData(
       backgroundColor: backgroundColor ?? this.backgroundColor,
@@ -384,6 +396,10 @@ class ActionKeyThemeData extends KeyThemeData {
       pressedForegroundColor:
           pressedForegroundColor ?? this.pressedForegroundColor,
       textStyle: textStyle ?? this.textStyle,
+      capsLockBackgroundColor:
+          capsLockBackgroundColor ?? this.capsLockBackgroundColor,
+      capsLockForegroundColor:
+          capsLockForegroundColor ?? this.capsLockForegroundColor,
     );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui show BoxHeightStyle, BoxWidthStyle;
 
+import 'package:clock/clock.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -244,12 +245,25 @@ No OnscreenKeyboard found in context. Did you wrap your app with OnscreenKeyboar
 class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     implements OnscreenKeyboardController {
   /// Whether to show the secondary keys.
-  bool get _showSecondary => _capsLock || _shift;
+  bool get _showSecondary => _capsLock || _shift || _shiftHeld;
 
   final _pressedActionKeys = <String>{};
   bool _shift = false;
   bool _capsLock = false;
   DateTime? _lastShiftTap;
+
+  /// Shift is physically held down; letters typed meanwhile stay uppercase
+  /// and the release is not counted as a tap.
+  bool _shiftHeld = false;
+  bool _typedWhileShiftHeld = false;
+
+  /// The current one-shot shift was armed automatically at a field or
+  /// sentence start. Only an automatically armed shift is disarmed again
+  /// automatically; a manual tap always wins.
+  bool _autoShift = false;
+
+  /// Two shift taps within this window toggle caps lock.
+  static const Duration shiftDoubleTapWindow = Duration(seconds: 1);
   Locale _locale = const Locale('en');
   late OnscreenKeyboardTypingMode _typingMode = widget.typingMode;
   List<OnscreenKeyboardSuggestion> _suggestions = const [];
@@ -381,13 +395,24 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (corrected) _correctionAfter = activeTextField?.controller.value;
     if (text != ' ') _lastSpaceTap = null;
     _clearSwipeUndoUnlessCurrent();
-    if (_shift && !_capsLock && text.trim().isNotEmpty) {
+    if (_shiftHeld && text.trim().isNotEmpty) {
+      _typedWhileShiftHeld = true;
+      if (_shift) {
+        setState(() {
+          _shift = false;
+          _autoShift = false;
+          _lastShiftTap = null;
+        });
+      }
+    } else if (_shift && !_capsLock && text.trim().isNotEmpty) {
       setState(() {
         _shift = false;
+        _autoShift = false;
         _lastShiftTap = null;
         _pressedActionKeys.remove(ActionKeyType.shift);
       });
     }
+    _maybeAutoShift();
     final afterBoundary = field?.controller.value;
     if (resolveCorrectionAfterBoundary &&
         beforeBoundary != null &&
@@ -408,6 +433,33 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     } else {
       unawaited(_afterTextInput(text, learnBoundary: !corrected));
     }
+  }
+
+  /// Applies the armed shift to a word inserted as a whole (swipe
+  /// candidate, accepted suggestion) the way typing its first letter would.
+  String _casedWord(String word) {
+    if (word.isEmpty) return word;
+    if (_capsLock) return word.toUpperCase();
+    if (_shift || _shiftHeld) {
+      return word[0].toUpperCase() + word.substring(1);
+    }
+    return word;
+  }
+
+  /// A whole word consumed the one-shot shift exactly like a letter does.
+  void _consumeShiftAfterWord() {
+    if (_shiftHeld) {
+      _typedWhileShiftHeld = true;
+    }
+    if (_shift && !_capsLock) {
+      setState(() {
+        _shift = false;
+        _autoShift = false;
+        _lastShiftTap = null;
+        if (!_shiftHeld) _pressedActionKeys.remove(ActionKeyType.shift);
+      });
+    }
+    _maybeAutoShift();
   }
 
   void _insertText(String text, {bool replaceCurrentWord = false}) {
@@ -710,7 +762,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       switchLocale();
       return;
     }
-    if (key.name == ActionKeyType.shift || key.name == ActionKeyType.capslock) {
+    if (key.name == ActionKeyType.shift) {
+      _beginShiftHold();
+      return;
+    }
+    if (key.name == ActionKeyType.capslock) {
       _handleShift(key.name);
       return;
     }
@@ -757,6 +813,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
               activeTextField!.onChanged!(newText);
             }
           }
+          _maybeAutoShift();
 
         case ActionKeyType.tab:
           if (!controller.selection.isValid) return;
@@ -794,6 +851,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
             if (newText != originalText && activeTextField!.onChanged != null) {
               activeTextField!.onChanged!(newText);
             }
+            _maybeAutoShift();
           } else {
             activeTextField!.onEditingComplete?.call();
             activeTextField!.onSubmitted?.call(controller.text);
@@ -813,9 +871,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   void _handleActionKeyUp(ActionKey key) {
-    if (key.name == ActionKeyType.shift || key.name == ActionKeyType.capslock) {
+    if (key.name == ActionKeyType.shift) {
+      _endShiftHold();
       return;
     }
+    if (key.name == ActionKeyType.capslock) return;
     _safeSetState(() {
       if (key.canHold && !_pressedActionKeys.contains(key.name)) {
         _pressedActionKeys.add(key.name);
@@ -825,12 +885,44 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     });
   }
 
+  void _beginShiftHold() {
+    setState(() {
+      _shiftHeld = true;
+      _typedWhileShiftHeld = false;
+      if (!_capsLock) _pressedActionKeys.add(ActionKeyType.shift);
+    });
+  }
+
+  void _endShiftHold() {
+    if (!_shiftHeld) return;
+    final typedWhileHeld = _typedWhileShiftHeld;
+    setState(() {
+      _shiftHeld = false;
+      _typedWhileShiftHeld = false;
+    });
+    if (typedWhileHeld) {
+      // Holding shift typed its capitals; the release is not a tap.
+      setState(() {
+        _lastShiftTap = null;
+        _pressedActionKeys.remove(ActionKeyType.shift);
+        if (_shift) _pressedActionKeys.add(ActionKeyType.shift);
+      });
+      return;
+    }
+    _handleShift(ActionKeyType.shift);
+  }
+
   void _handleShift(String name) {
-    final now = DateTime.now();
+    // clock.now() so the double-tap window follows the test clock.
+    final now = clock.now();
     final doubleTap =
         _lastShiftTap != null &&
-        now.difference(_lastShiftTap!) <= const Duration(milliseconds: 300);
+        now.difference(_lastShiftTap!) <= shiftDoubleTapWindow;
+    // Leaving caps lock must not seed the next double tap, or a quick capital
+    // right after unlocking would lock again.
+    final leavesCapsLock = _capsLock && !doubleTap;
     setState(() {
+      _autoShift = false;
       if (name == ActionKeyType.capslock || doubleTap) {
         _capsLock = !_capsLock;
         _shift = false;
@@ -849,7 +941,48 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         _pressedActionKeys.add(ActionKeyType.shift);
       }
     });
-    _lastShiftTap = doubleTap || name == ActionKeyType.capslock ? null : now;
+    _lastShiftTap =
+        doubleTap || leavesCapsLock || name == ActionKeyType.capslock
+        ? null
+        : now;
+  }
+
+  /// Arms a one-shot shift at the start of a language field or sentence,
+  /// the way phone keyboards do, and disarms it again when the cursor
+  /// leaves such a position without a letter having been typed. Runs only
+  /// with an active typing mode: `off` stays fully manual.
+  void _maybeAutoShift() {
+    if (_typingMode == OnscreenKeyboardTypingMode.off) return;
+    if (_capsLock || _shiftHeld) return;
+    final field = activeTextField;
+    if (field == null) return;
+    final configuration = field.fieldConfiguration;
+    if (!configuration.isLanguageInput ||
+        configuration.obscureText ||
+        configuration.readOnly) {
+      return;
+    }
+    final value = field.controller.value;
+    if (!value.selection.isValid || !value.selection.isCollapsed) return;
+    final before = value.text.substring(0, value.selection.start);
+    final sentenceStart =
+        before.trim().isEmpty ||
+        RegExp(r'[.!?]\s+$').hasMatch(before) ||
+        RegExp(r'\n\s*$').hasMatch(before);
+    if (sentenceStart && !_shift) {
+      setState(() {
+        _shift = true;
+        _autoShift = true;
+        _lastShiftTap = null;
+        _pressedActionKeys.add(ActionKeyType.shift);
+      });
+    } else if (!sentenceStart && _shift && _autoShift) {
+      setState(() {
+        _shift = false;
+        _autoShift = false;
+        _pressedActionKeys.remove(ActionKeyType.shift);
+      });
+    }
   }
 
   /// Safely call [setState] after the current frame.
@@ -965,8 +1098,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       if (mode == OnscreenKeyboardTypingMode.off) {
         _suggestions = const [];
         _suggestionPrefix = null;
+        if (_autoShift) {
+          _shift = false;
+          _autoShift = false;
+          _pressedActionKeys.remove(ActionKeyType.shift);
+        }
       }
     });
+    if (mode != OnscreenKeyboardTypingMode.off) _maybeAutoShift();
     unawaited(_refreshSuggestions());
   }
 
@@ -1097,6 +1236,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   void attachTextField(OnscreenKeyboardFieldState state) {
     _activeTextField.value = state;
     _ensureValidMode();
+    _maybeAutoShift();
     if (_visible) _ensureActiveFieldVisible();
     unawaited(_refreshSuggestions());
   }
@@ -1325,8 +1465,12 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           if (result.first.confidence >= widget.minimumSwipeConfidence &&
               margin >= widget.minimumSwipeScoreMargin) {
             _swipeBefore = field.controller.value;
-            _insertText('${result.first.word} ', replaceCurrentWord: true);
+            _insertText(
+              '${_casedWord(result.first.word)} ',
+              replaceCurrentWord: true,
+            );
             _swipeAfter = field.controller.value;
+            _consumeShiftAfterWord();
           }
         }
         setState(() => _suggestions = result);
@@ -1348,7 +1492,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         activeTextField?.controller.value == _swipeAfter) {
       activeTextField!.controller.value = _swipeBefore!;
     }
-    _insertText('${suggestion.word} ', replaceCurrentWord: true);
+    _insertText('${_casedWord(suggestion.word)} ', replaceCurrentWord: true);
+    _consumeShiftAfterWord();
     if (isSwipeAlternative &&
         _lastSwipeGesture != null &&
         widget.languageModel is OnscreenKeyboardSwipeLearningModel) {
