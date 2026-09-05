@@ -346,6 +346,150 @@ void main() {
     expect(controller.text, 'QwERt');
   });
 
+  testWidgets('two shift taps up to a second apart engage caps lock', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
+    expect(semantics('Caps Lock on'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('onscreen-keyboard-caps-lock-bar')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byIcon(Icons.keyboard_capslock_rounded));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_capslock_rounded), findsNothing);
+  });
+
+  testWidgets('holding shift types capitals until it is released', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    final shift = await tester.startGesture(
+      tester.getCenter(find.byIcon(Icons.arrow_upward_rounded)),
+    );
+    await tester.pump();
+    expect(semantics('Shift on'), findsOneWidget);
+    await tester.tap(find.text('Q'));
+    await tester.pump();
+    await tester.tap(find.text('W'));
+    await tester.pump();
+    expect(controller.text, 'QW');
+    expect(semantics('Shift on'), findsOneWidget);
+
+    await shift.up();
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_capslock_rounded), findsNothing);
+    await tester.tap(find.text('e'));
+    expect(controller.text, 'QWe');
+  });
+
+  testWidgets('typing mode off never arms shift automatically', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.text('q'));
+    expect(controller.text, 'q');
+  });
+
+  testWidgets('an active typing mode shifts at field and sentence starts', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      typingMode: OnscreenKeyboardTypingMode.suggestions,
+    );
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    expect(semantics('Shift on'), findsOneWidget);
+    await tester.tap(find.text('Q'));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.text('w'));
+    await tester.tap(find.text('.'));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.pump();
+    expect(semantics('Shift on'), findsOneWidget);
+    await tester.tap(find.text('E'));
+    await tester.pump();
+    expect(controller.text, 'Qw. E');
+
+    // A manual tap disarms the automatic shift; typing keeps it off.
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
+    expect(semantics('Shift on'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.text('r'));
+    expect(controller.text, 'Qw. r');
+  });
+
+  testWidgets('accent alternates are drawn larger than the key label', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    final gesture = await tester.startGesture(tester.getCenter(find.text('a')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 451));
+
+    final alternate = tester.widget<Text>(find.text('á'));
+    final alternateStyle = DefaultTextStyle.of(
+      tester.element(find.text('á')),
+    ).style.merge(alternate.style);
+    final key = tester.widget<Text>(
+      find.descendant(
+        of: find.byType(RawOnscreenKeyboard),
+        matching: find.text('a'),
+      ),
+    );
+    final keyStyle = DefaultTextStyle.of(
+      tester.element(
+        find.descendant(
+          of: find.byType(RawOnscreenKeyboard),
+          matching: find.text('a'),
+        ),
+      ),
+    ).style.merge(key.style);
+    expect(alternateStyle.fontSize, greaterThan(keyStyle.fontSize ?? 0));
+    expect(alternateStyle.fontSize, greaterThanOrEqualTo(28));
+    await gesture.up();
+    await tester.pump();
+  });
+
   testWidgets('multiline field shows Return and inserts a newline', (
     tester,
   ) async {
@@ -459,10 +603,10 @@ void main() {
       languageModel: languageModel,
       typingMode: OnscreenKeyboardTypingMode.suggestions,
     );
-    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
-    await gesture.moveTo(tester.getCenter(find.text('e')));
-    await gesture.moveTo(tester.getCenter(find.text('l')));
-    await gesture.moveTo(tester.getCenter(find.text('o')));
+    final gesture = await tester.startGesture(tester.getCenter(find.text('H')));
+    await gesture.moveTo(tester.getCenter(find.text('E')));
+    await gesture.moveTo(tester.getCenter(find.text('L')));
+    await gesture.moveTo(tester.getCenter(find.text('O')));
     await tester.pump(const Duration(milliseconds: 33));
 
     expect(languageModel.decodeCount, 1);
@@ -471,7 +615,9 @@ void main() {
     await gesture.up();
     await tester.pump();
 
-    expect(controller.text, 'hello ');
+    // The field start armed the automatic shift: the swiped word is
+    // capitalised exactly as a typed first letter would be.
+    expect(controller.text, 'Hello ');
     expect(languageModel.lastTrace, ['h', 'e', 'l', 'o']);
     expect(languageModel.lastPoints, isNotEmpty);
     expect(languageModel.lastKeyCenters, contains('h'));
@@ -489,10 +635,10 @@ void main() {
       typingMode: OnscreenKeyboardTypingMode.suggestions,
       swipeTypingEnabled: false,
     );
-    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
-    await gesture.moveTo(tester.getCenter(find.text('e')));
-    await gesture.moveTo(tester.getCenter(find.text('l')));
-    await gesture.moveTo(tester.getCenter(find.text('o')));
+    final gesture = await tester.startGesture(tester.getCenter(find.text('H')));
+    await gesture.moveTo(tester.getCenter(find.text('E')));
+    await gesture.moveTo(tester.getCenter(find.text('L')));
+    await gesture.moveTo(tester.getCenter(find.text('O')));
     await tester.pump(const Duration(milliseconds: 40));
     await gesture.up();
     await tester.pump();
@@ -646,7 +792,7 @@ void main() {
       typingMode: OnscreenKeyboardTypingMode.suggestions,
     );
 
-    await tester.tap(find.text('h'));
+    await tester.tap(find.text('H'));
     await tester.pumpAndSettle();
 
     expect(model.lastTapSamples, hasLength(1));
@@ -719,13 +865,13 @@ void main() {
       languageModel: const _StaticLanguageModel(),
       typingMode: OnscreenKeyboardTypingMode.suggestions,
     );
-    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
-    await gesture.moveTo(tester.getCenter(find.text('e')));
-    await gesture.moveTo(tester.getCenter(find.text('l')));
-    await gesture.moveTo(tester.getCenter(find.text('o')));
+    final gesture = await tester.startGesture(tester.getCenter(find.text('H')));
+    await gesture.moveTo(tester.getCenter(find.text('E')));
+    await gesture.moveTo(tester.getCenter(find.text('L')));
+    await gesture.moveTo(tester.getCenter(find.text('O')));
     await gesture.up();
     await tester.pump();
-    expect(controller.text, 'hello ');
+    expect(controller.text, 'Hello ');
 
     await tester.tap(find.byIcon(Icons.backspace_outlined));
     expect(controller.text, isEmpty);
@@ -739,10 +885,10 @@ void main() {
       languageModel: const _LowConfidenceLanguageModel(),
       typingMode: OnscreenKeyboardTypingMode.suggestions,
     );
-    final gesture = await tester.startGesture(tester.getCenter(find.text('h')));
-    await gesture.moveTo(tester.getCenter(find.text('e')));
-    await gesture.moveTo(tester.getCenter(find.text('l')));
-    await gesture.moveTo(tester.getCenter(find.text('o')));
+    final gesture = await tester.startGesture(tester.getCenter(find.text('H')));
+    await gesture.moveTo(tester.getCenter(find.text('E')));
+    await gesture.moveTo(tester.getCenter(find.text('L')));
+    await gesture.moveTo(tester.getCenter(find.text('O')));
     await gesture.up();
     await tester.pump();
 

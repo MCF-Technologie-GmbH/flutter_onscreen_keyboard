@@ -165,8 +165,10 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     _removeKeyPreview();
     final box = context.findRenderObject()! as RenderBox;
     final origin = box.localToGlobal(Offset.zero);
-    const itemWidth = 44.0;
-    const height = 52.0;
+    // Accent alternates are picked by sliding a finger over them, so they
+    // are drawn larger than the key itself.
+    const itemWidth = 64.0;
+    const height = 76.0;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final width = math.min(
       itemWidth * widget.textKey.alternates.length,
@@ -201,7 +203,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
                         widget.showSecondary
                             ? widget.textKey.alternates[i].toUpperCase()
                             : widget.textKey.alternates[i],
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: Theme.of(context).textTheme.headlineMedium,
                       ),
                     ),
                   ),
@@ -445,7 +447,8 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
     final colors = Theme.of(context).colorScheme;
     final theme = context.theme.actionKeyThemeData;
     final isShift = widget.actionKey.name == ActionKeyType.shift;
-    final visualChild = isShift && widget.capsLock
+    final capsLock = isShift && widget.capsLock;
+    final visualChild = capsLock
         ? const Icon(Icons.keyboard_capslock_rounded)
         : widget.actionKey.child;
     final semanticLabel = isShift
@@ -478,6 +481,46 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
     final visuallyPressed =
         widget.pressed ||
         (widget.feedback.enableVisualFeedback && _pointer != null);
+    final background = capsLock
+        ? theme.capsLockBackgroundColor ??
+              theme.pressedBackgroundColor ??
+              colors.primary
+        : visuallyPressed
+        ? theme.pressedBackgroundColor ?? colors.primary
+        : theme.backgroundColor ?? colors.surfaceContainer;
+    final foreground = capsLock
+        ? theme.capsLockForegroundColor ??
+              theme.pressedForegroundColor ??
+              colors.onPrimary
+        : visuallyPressed
+        ? theme.pressedForegroundColor ?? colors.onPrimary
+        : theme.foregroundColor ?? colors.onSurface;
+    if (capsLock) {
+      // Caps lock must not look like a momentary shift: the key keeps its
+      // pressed colours and gains a lock bar under the icon.
+      child = Stack(
+        fit: StackFit.expand,
+        children: [
+          child,
+          Positioned(
+            bottom: 6,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                key: const ValueKey('onscreen-keyboard-caps-lock-bar'),
+                width: 22,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: foreground,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
     return Semantics(
       button: true,
       toggled: isShift ? widget.pressed : null,
@@ -498,16 +541,12 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
               border: theme.border,
               boxShadow: theme.boxShadow,
               gradient: theme.gradient,
-              color: visuallyPressed
-                  ? theme.pressedBackgroundColor ?? colors.primary
-                  : theme.backgroundColor ?? colors.surfaceContainer,
+              color: background,
             ),
             child: IconTheme(
               data: IconThemeData(
                 size: theme.iconSize,
-                color: visuallyPressed
-                    ? theme.pressedForegroundColor ?? colors.onPrimary
-                    : theme.foregroundColor ?? colors.onSurface,
+                color: foreground,
               ),
               child: child,
             ),
