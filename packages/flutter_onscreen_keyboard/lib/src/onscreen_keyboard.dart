@@ -224,17 +224,14 @@ class OnscreenKeyboard extends StatefulWidget {
   static OnscreenKeyboardController of(BuildContext context) {
     final provider = context
         .getInheritedWidgetOfExactType<_OnscreenKeyboardProvider>();
-    assert(
-      provider != null,
-      '''
+    assert(provider != null, '''
 No OnscreenKeyboard found in context. Did you wrap your app with OnscreenKeyboard?
 
     MaterialApp(
       builder: OnscreenKeyboard.builder(),  // <- add this line
       home: const App(),
     )
-    ''',
-    );
+    ''');
     return provider!.state;
   }
 
@@ -526,9 +523,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         !controller.selection.isCollapsed ||
         offset < 2 ||
         controller.text[offset - 1] != ' ' ||
-        !RegExp(r'[\p{L}\p{N}\p{M}]', unicode: true).hasMatch(
-          controller.text[offset - 2],
-        )) {
+        !RegExp(
+          r'[\p{L}\p{N}\p{M}]',
+          unicode: true,
+        ).hasMatch(controller.text[offset - 2])) {
       return false;
     }
     _lastSpaceTap = null;
@@ -537,10 +535,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   bool _isWordBoundary(String text) => RegExp(r'^\s|[.,!?;:]$').hasMatch(text);
 
-  Future<void> _afterTextInput(
-    String text, {
-    bool learnBoundary = true,
-  }) async {
+  Future<void> _afterTextInput(String text, {bool learnBoundary = true}) async {
     if (_isWordBoundary(text) && learnBoundary) {
       final words = _wordsBeforeCursor();
       if (words.isNotEmpty &&
@@ -918,9 +913,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final doubleTap =
         _lastShiftTap != null &&
         now.difference(_lastShiftTap!) <= shiftDoubleTapWindow;
-    // Leaving caps lock must not seed the next double tap, or a quick capital
-    // right after unlocking would lock again.
-    final leavesCapsLock = _capsLock && !doubleTap;
+    // Only a tap that arms shift from off can start a double tap. Disarming
+    // and quickly re-arming, or leaving caps lock, must never lock again.
+    final armsShift = !doubleTap && !_capsLock && !_shift;
     setState(() {
       _autoShift = false;
       if (name == ActionKeyType.capslock || doubleTap) {
@@ -941,10 +936,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         _pressedActionKeys.add(ActionKeyType.shift);
       }
     });
-    _lastShiftTap =
-        doubleTap || leavesCapsLock || name == ActionKeyType.capslock
-        ? null
-        : now;
+    _lastShiftTap = armsShift && name == ActionKeyType.shift ? now : null;
   }
 
   /// Arms a one-shot shift at the start of a language field or sentence,
@@ -1171,9 +1163,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   @override
-  Future<void> forgetSuggestion(
-    OnscreenKeyboardSuggestion suggestion,
-  ) async {
+  Future<void> forgetSuggestion(OnscreenKeyboardSuggestion suggestion) async {
     final model = widget.languageModel;
     if (model == null ||
         model is! OnscreenKeyboardSuggestionPersonalizationModel) {
@@ -1749,9 +1739,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       child: OnscreenKeyboardTheme(
         data: resolvedTheme,
         child: widget.presentation == OnscreenKeyboardPresentation.docked
-            ? _RetargetableOverlay(
-                child: _buildDocked(context, resolvedLayout),
-              )
+            ? _RetargetableOverlay(child: _buildDocked(context, resolvedLayout))
             : _buildFloating(context, resolvedLayout),
       ),
     );
@@ -1984,10 +1972,7 @@ class _RetargetableOverlayState extends State<_RetargetableOverlay> {
 /// This bar typically appears at the top of the keyboard and provides:
 class _ControlBar extends StatelessWidget {
   /// Creates a control bar for the on-screen keyboard.
-  const _ControlBar({
-    required this.dragHandle,
-    this.actions,
-  });
+  const _ControlBar({required this.dragHandle, this.actions});
 
   /// A widget used for dragging the keyboard.
   final Widget dragHandle;
@@ -2009,10 +1994,7 @@ class _ControlBar extends StatelessWidget {
 
     final Widget trailing;
     if (actions != null && actions!.isNotEmpty) {
-      trailing = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: actions!,
-      );
+      trailing = Row(mainAxisSize: MainAxisSize.min, children: actions!);
     } else {
       trailing = Flexible(
         child: FittedBox(
@@ -2051,10 +2033,7 @@ class _ControlBar extends StatelessWidget {
         data: IconButtonThemeData(style: IconButton.styleFrom(iconSize: 16)),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            dragHandle,
-            trailing,
-          ],
+          children: [dragHandle, trailing],
         ),
       ),
     );
@@ -2064,10 +2043,7 @@ class _ControlBar extends StatelessWidget {
 /// An [InheritedWidget] that provides [OnscreenKeyboardController]
 /// to its descendants.
 class _OnscreenKeyboardProvider extends InheritedWidget {
-  const _OnscreenKeyboardProvider({
-    required this.state,
-    required super.child,
-  });
+  const _OnscreenKeyboardProvider({required this.state, required super.child});
 
   /// The state of the nearest [OnscreenKeyboard] in the widget tree.
   final _OnscreenKeyboardState state;
