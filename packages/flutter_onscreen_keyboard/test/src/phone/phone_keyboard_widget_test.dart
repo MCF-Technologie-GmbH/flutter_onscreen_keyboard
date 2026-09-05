@@ -271,9 +271,7 @@ void main() {
 
   testWidgets(
     'runtime disable closes the keyboard and blocks controller open',
-    (
-      tester,
-    ) async {
+    (tester) async {
       var enabled = true;
       late StateSetter update;
       await tester.pumpWidget(
@@ -375,6 +373,37 @@ void main() {
     expect(find.byIcon(Icons.keyboard_capslock_rounded), findsNothing);
   });
 
+  testWidgets('disarming and quickly re-arming shift never locks caps', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(tester, controller: controller);
+    Finder semantics(String label) => find.byWidgetPredicate(
+      (widget) => widget is Semantics && widget.properties.label == label,
+    );
+
+    // Arm, change your mind after a while, arm again quickly.
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(seconds: 3));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
+    expect(semantics('Shift on'), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_capslock_rounded), findsNothing);
+
+    // Only an arming tap followed by a second tap locks.
+    await tester.pump(const Duration(milliseconds: 1200));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(semantics('Shift off'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.pump();
+    expect(semantics('Caps Lock on'), findsOneWidget);
+  });
+
   testWidgets('holding shift types capitals until it is released', (
     tester,
   ) async {
@@ -404,9 +433,7 @@ void main() {
     expect(controller.text, 'QWe');
   });
 
-  testWidgets('typing mode off never arms shift automatically', (
-    tester,
-  ) async {
+  testWidgets('typing mode off never arms shift automatically', (tester) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
     Finder semantics(String label) => find.byWidgetPredicate(
@@ -820,9 +847,7 @@ void main() {
 
   testWidgets(
     'double space inserts a period and punctuation consumes spacing',
-    (
-      tester,
-    ) async {
+    (tester) async {
       final controller = TextEditingController(text: 'hello')
         ..selection = const TextSelection.collapsed(offset: 5);
       await _pumpKeyboard(tester, controller: controller);

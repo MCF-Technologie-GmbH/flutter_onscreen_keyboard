@@ -1,3 +1,8 @@
+## 0.7.1-mcf.1
+
+- Shift: only a tap that arms shift from off can start the caps lock double
+  tap. Disarming and quickly re-arming shift no longer locks caps.
+
 ## 0.7.0-mcf.1
 
 - Shift: two taps within one second toggle caps lock (`shiftDoubleTapWindow`);
