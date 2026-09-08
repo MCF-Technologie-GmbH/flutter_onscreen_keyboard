@@ -727,6 +727,47 @@ void main() {
     expect(controller.text, 'helo');
   });
 
+  testWidgets(
+    'autocorrect preserves capitalization applied by automatic shift',
+    (tester) async {
+      final controller = TextEditingController();
+      await _pumpKeyboard(
+        tester,
+        controller: controller,
+        languageModel: const _StaticLanguageModel(),
+        typingMode: OnscreenKeyboardTypingMode.autocorrect,
+      );
+
+      for (final letter in ['H', 'e', 'l', 'o']) {
+        await tester.tap(find.text(letter));
+        await tester.pump();
+      }
+      await tester.tap(find.byIcon(Icons.space_bar_rounded));
+      await tester.pump();
+      expect(controller.text, 'Hello ');
+
+      await tester.tap(find.byIcon(Icons.backspace_outlined));
+      expect(controller.text, 'Helo');
+    },
+  );
+
+  testWidgets('autocorrect still protects manually capitalized words', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: 'say Helo')
+      ..selection = const TextSelection.collapsed(offset: 8);
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      languageModel: const _StaticLanguageModel(),
+      typingMode: OnscreenKeyboardTypingMode.autocorrect,
+    );
+
+    await tester.tap(find.byIcon(Icons.space_bar_rounded));
+    await tester.pump();
+    expect(controller.text, 'say Helo ');
+  });
+
   testWidgets('boundary waits for the current asynchronous correction', (
     tester,
   ) async {

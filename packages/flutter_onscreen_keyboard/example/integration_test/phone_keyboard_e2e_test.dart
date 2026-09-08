@@ -117,11 +117,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 80));
     await tester.tap(find.byIcon(Icons.space_bar_rounded));
     await tester.pump();
-    expect(_textOf(tester, field), 'hello ');
+    expect(_textOf(tester, field), 'Hello ');
 
     await tester.tap(find.byIcon(Icons.backspace_outlined));
     await tester.pump();
-    expect(_textOf(tester, field), 'helo');
+    expect(_textOf(tester, field), 'Helo');
   });
 
   testWidgets('Shift Caps Lock and Return work through the rendered keyboard', (

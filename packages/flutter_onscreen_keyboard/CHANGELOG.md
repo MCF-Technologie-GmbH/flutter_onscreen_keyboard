@@ -2,6 +2,9 @@
 
 - Shift: only a tap that arms shift from off can start the caps lock double
   tap. Disarming and quickly re-arming shift no longer locks caps.
+- Autocorrect: sentence-start words capitalized by automatic Shift remain
+  eligible for correction and preserve their initial capital; manually
+  capitalized words remain protected.
 
 ## 0.7.0-mcf.1
 
