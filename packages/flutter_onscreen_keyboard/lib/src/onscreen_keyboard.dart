@@ -259,6 +259,12 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   /// automatically; a manual tap always wins.
   bool _autoShift = false;
 
+  /// Whether the first letter of the word currently being typed was
+  /// capitalized by [_maybeAutoShift]. This lets autocorrect preserve the
+  /// keyboard's own sentence casing without treating manually capitalized
+  /// words as safe automatic replacements.
+  bool _currentWordWasAutoShifted = false;
+
   /// Two shift taps within this window toggle caps lock.
   static const Duration shiftDoubleTapWindow = Duration(seconds: 1);
   Locale _locale = const Locale('en');
@@ -350,6 +356,14 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final text = key.getText(secondary: _showSecondary);
     final isBoundary = _isWordBoundary(text);
     final field = activeTextField;
+    if (!isBoundary &&
+        _autoShift &&
+        field != null &&
+        _currentWordRange(field.controller.value).isCollapsed &&
+        RegExp(r'[\p{L}\p{M}]', unicode: true).hasMatch(text)) {
+      _currentWordWasAutoShifted = true;
+    }
+    final boundaryWasAutoShifted = isBoundary && _currentWordWasAutoShifted;
     final boundaryRange = isBoundary && field != null
         ? _currentWordRange(field.controller.value)
         : TextRange.empty;
@@ -362,7 +376,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final cachedSuggestionsMatch =
         boundaryOriginal.isNotEmpty &&
         _suggestionPrefix?.toLowerCase() == boundaryOriginal.toLowerCase();
-    final corrected = isBoundary && _maybeApplyCachedCorrection();
+    final corrected =
+        isBoundary &&
+        _maybeApplyCachedCorrection(
+          automaticallyCapitalized: boundaryWasAutoShifted,
+        );
     final resolveCorrectionAfterBoundary =
         isBoundary &&
         !corrected &&
@@ -384,6 +402,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (isBoundary) {
       _tapSamples.clear();
       _keyCenters = const {};
+      _currentWordWasAutoShifted = false;
     }
     final handled =
         (text == ' ' && _maybeInsertDoubleSpacePeriod()) ||
@@ -425,6 +444,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           previousWords: previousWords,
           tapSamples: boundaryTapSamples,
           keyCenters: boundaryKeyCenters,
+          automaticallyCapitalized: boundaryWasAutoShifted,
         ),
       );
     } else {
@@ -563,7 +583,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     await _refreshSuggestions();
   }
 
-  bool _maybeApplyCachedCorrection() {
+  bool _maybeApplyCachedCorrection({required bool automaticallyCapitalized}) {
     final field = activeTextField;
     if (_typingMode != OnscreenKeyboardTypingMode.autocorrect ||
         field == null ||
@@ -577,21 +597,31 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (_suggestionPrefix?.toLowerCase() != original.toLowerCase()) {
       return false;
     }
-    final candidate = _automaticCorrectionFor(original, _suggestions);
+    final candidate = _automaticCorrectionFor(
+      original,
+      _suggestions,
+      automaticallyCapitalized: automaticallyCapitalized,
+    );
     if (candidate == null) return false;
+    final replacement = _preserveAutomaticCapitalization(
+      candidate.word,
+      original: original,
+      automaticallyCapitalized: automaticallyCapitalized,
+    );
     _correctionOriginal = original;
-    _correctionReplacement = candidate.word;
+    _correctionReplacement = replacement;
     _correctionPreviousWords = _wordsBeforeCursor(includeCurrent: false);
     _correctionBefore = field.controller.value;
-    _insertText(candidate.word, replaceCurrentWord: true);
+    _insertText(replacement, replaceCurrentWord: true);
     _correctionAfter = field.controller.value;
     return true;
   }
 
   OnscreenKeyboardSuggestion? _automaticCorrectionFor(
     String original,
-    List<OnscreenKeyboardSuggestion> suggestions,
-  ) {
+    List<OnscreenKeyboardSuggestion> suggestions, {
+    required bool automaticallyCapitalized,
+  }) {
     if (suggestions.any(
       (suggestion) =>
           suggestion.kind == OnscreenKeyboardSuggestionKind.typed &&
@@ -616,7 +646,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (candidate.word.toLowerCase() == original.toLowerCase() ||
         candidate.confidence < .985 ||
         margin < requiredMargin ||
-        !_safeToCorrect(original)) {
+        !_safeToCorrect(
+          original,
+          automaticallyCapitalized: automaticallyCapitalized,
+        )) {
       return null;
     }
     return candidate;
@@ -638,6 +671,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     required List<String> previousWords,
     required List<OnscreenKeyboardTapSample> tapSamples,
     required Map<String, Offset> keyCenters,
+    required bool automaticallyCapitalized,
   }) async {
     final model = widget.languageModel;
     if (model == null) return;
@@ -665,23 +699,32 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           field.controller.value != afterBoundary) {
         return;
       }
-      final candidate = _automaticCorrectionFor(original, result);
+      final candidate = _automaticCorrectionFor(
+        original,
+        result,
+        automaticallyCapitalized: automaticallyCapitalized,
+      );
       if (candidate == null) {
         await _afterTextInput(' ');
         return;
       }
+      final replacement = _preserveAutomaticCapitalization(
+        candidate.word,
+        original: original,
+        automaticallyCapitalized: automaticallyCapitalized,
+      );
       _correctionOriginal = original;
-      _correctionReplacement = candidate.word;
+      _correctionReplacement = replacement;
       _correctionPreviousWords = previousWords;
       _correctionBefore = beforeBoundary;
-      if (!_replaceRange(wordRange.start, wordRange.end, candidate.word)) {
+      if (!_replaceRange(wordRange.start, wordRange.end, replacement)) {
         await _afterTextInput(' ');
         return;
       }
       final boundaryLength =
           afterBoundary.text.length - beforeBoundary.text.length;
       field.controller.selection = TextSelection.collapsed(
-        offset: wordRange.start + candidate.word.length + boundaryLength,
+        offset: wordRange.start + replacement.length + boundaryLength,
       );
       _correctionAfter = field.controller.value;
       await _refreshSuggestions();
@@ -747,10 +790,35 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     _correctionPreviousWords = const [];
   }
 
-  bool _safeToCorrect(String word) =>
-      word == word.toLowerCase() &&
-      RegExp(r'^[\p{L}]+$', unicode: true).hasMatch(word) &&
-      !word.contains(RegExp(r'[/@._\d]'));
+  bool _safeToCorrect(
+    String word, {
+    required bool automaticallyCapitalized,
+  }) {
+    final lowercase = word.toLowerCase();
+    final hasAutomaticInitialCapital =
+        automaticallyCapitalized &&
+        word.length > 1 &&
+        word[0] == word[0].toUpperCase() &&
+        word.substring(1) == word.substring(1).toLowerCase();
+    return (word == lowercase || hasAutomaticInitialCapital) &&
+        RegExp(r'^[\p{L}]+$', unicode: true).hasMatch(word) &&
+        !word.contains(RegExp(r'[/@._\d]'));
+  }
+
+  String _preserveAutomaticCapitalization(
+    String candidate, {
+    required String original,
+    required bool automaticallyCapitalized,
+  }) {
+    if (!automaticallyCapitalized ||
+        candidate.isEmpty ||
+        original.length < 2 ||
+        original[0] != original[0].toUpperCase() ||
+        original.substring(1) != original.substring(1).toLowerCase()) {
+      return candidate;
+    }
+    return candidate[0].toUpperCase() + candidate.substring(1);
+  }
 
   void _handleActionKeyDown(ActionKey key) {
     if (key.name == ActionKeyType.language) {
