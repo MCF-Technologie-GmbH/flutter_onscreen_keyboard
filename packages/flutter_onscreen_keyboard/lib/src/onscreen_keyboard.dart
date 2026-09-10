@@ -43,13 +43,18 @@ class OnscreenKeyboard extends StatefulWidget {
     this.feedback = const OnscreenKeyboardFeedback(),
     this.editingGestures = const OnscreenKeyboardEditingGestures(),
     this.suggestionBarBuilder,
+    this.suggestionBarHeight = 44,
     this.swipeTypingEnabled = true,
     this.onSwipeDiagnostic,
     this.minimumSwipeConfidence = .48,
     this.minimumSwipeScoreMargin = .12,
     this.dockedHeight,
+    this.overlayDragEnabled = false,
     this.enabled = true,
-  });
+  }) : assert(
+         suggestionBarHeight > 0,
+         'suggestionBarHeight must be greater than zero.',
+       );
 
   /// The main application child widget.
   final Widget child;
@@ -78,6 +83,9 @@ class OnscreenKeyboard extends StatefulWidget {
   final WidthGetter? width;
 
   /// A widget displayed as a drag handle to move the keyboard.
+  ///
+  /// Floating presentation always supports dragging. Overlay presentation
+  /// uses this widget when [overlayDragEnabled] is true.
   final Widget? dragHandle;
 
   /// {@macro keyboardLayout.aspectRatio}
@@ -114,6 +122,11 @@ class OnscreenKeyboard extends StatefulWidget {
   /// Optional replacement for the default three-slot suggestion bar.
   final SuggestionBarBuilder? suggestionBarBuilder;
 
+  /// Height reserved for the phone presentation's suggestion/utility bar.
+  ///
+  /// Defaults to 44 logical pixels for compatibility.
+  final double suggestionBarHeight;
+
   /// Whether experimental swipe decoding is enabled.
   ///
   /// Defaults to `true` for compatibility. Products that do not explicitly
@@ -133,6 +146,12 @@ class OnscreenKeyboard extends StatefulWidget {
   ///
   /// Defaults to a responsive viewport fraction.
   final HeightGetter? dockedHeight;
+
+  /// Whether overlay presentation exposes a handle for vertical movement.
+  ///
+  /// The keyboard follows the pointer directly and remains at its released
+  /// height. Defaults to false for compatibility.
+  final bool overlayDragEnabled;
 
   /// A builder to wrap the app with [OnscreenKeyboard].
   ///
@@ -161,6 +180,9 @@ class OnscreenKeyboard extends StatefulWidget {
   ///   keyboard. Defaults to `true`.
   /// - [dragHandle]: A widget to show as the drag handle above the keyboard.
   ///   If null, a default handle is shown.
+  /// - [overlayDragEnabled]: Whether overlay presentation may be repositioned
+  ///   vertically with its drag handle.
+  /// - [suggestionBarHeight]: Height of the phone suggestion/utility bar.
   /// - [aspectRatio]: Determines the width-to-height ratio of the
   ///   keyboard widget.
   /// - [buildControlBarActions]: A callback that builds trailing action widgets
@@ -189,11 +211,13 @@ class OnscreenKeyboard extends StatefulWidget {
     OnscreenKeyboardEditingGestures editingGestures =
         const OnscreenKeyboardEditingGestures(),
     SuggestionBarBuilder? suggestionBarBuilder,
+    double suggestionBarHeight = 44,
     bool swipeTypingEnabled = true,
     ValueChanged<OnscreenKeyboardSwipeDiagnostic>? onSwipeDiagnostic,
     double minimumSwipeConfidence = .48,
     double minimumSwipeScoreMargin = .12,
     HeightGetter? dockedHeight,
+    bool overlayDragEnabled = false,
     bool enabled = true,
   }) => (context, child) {
     return OnscreenKeyboard(
@@ -212,11 +236,13 @@ class OnscreenKeyboard extends StatefulWidget {
       feedback: feedback,
       editingGestures: editingGestures,
       suggestionBarBuilder: suggestionBarBuilder,
+      suggestionBarHeight: suggestionBarHeight,
       swipeTypingEnabled: swipeTypingEnabled,
       onSwipeDiagnostic: onSwipeDiagnostic,
       minimumSwipeConfidence: minimumSwipeConfidence,
       minimumSwipeScoreMargin: minimumSwipeScoreMargin,
       dockedHeight: dockedHeight,
+      overlayDragEnabled: overlayDragEnabled,
       enabled: enabled,
       child: child!,
     );
@@ -310,6 +336,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
     if (widget.typingMode != oldWidget.typingMode) {
       _typingMode = widget.typingMode;
+    }
+    if (oldWidget.overlayDragEnabled && !widget.overlayDragEnabled) {
+      _overlayVerticalPosition = 1;
     }
     if (widget.languageModel != oldWidget.languageModel ||
         widget.typingMode != oldWidget.typingMode ||
@@ -1114,8 +1143,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
               ancestor: surface,
             )
             .dy;
-        final keyboardTop =
-            surface.size.height - _phonePanelHeight(context, _resolveLayout());
+        final panelHeight = _phonePanelHeight(context, _resolveLayout());
+        final keyboardTop = _overlayTop(surface.size.height, panelHeight);
         final overlap = fieldBottom - (keyboardTop - 12);
         if (overlap > 0) {
           final target = (scrollable.position.pixels + overlap).clamp(
@@ -1313,6 +1342,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   @override
   void setAlignment(Alignment alignment) {
     _alignListener.value = ((alignment.x + 1) / 2, (alignment.y + 1) / 2);
+    final overlayPosition = ((alignment.y + 1) / 2).clamp(0.0, 1.0);
+    if (_overlayVerticalPosition != overlayPosition) {
+      setState(() => _overlayVerticalPosition = overlayPosition);
+    }
   }
 
   @override
@@ -1662,10 +1695,13 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   Widget _buildSuggestionBar(BuildContext context) {
     final undo = _correctionBefore == null ? null : undoLastCorrection;
     if (widget.suggestionBarBuilder case final builder?) {
-      return builder(context, _suggestions, _acceptSuggestion, undo);
+      return SizedBox(
+        height: widget.suggestionBarHeight,
+        child: builder(context, _suggestions, _acceptSuggestion, undo),
+      );
     }
     return SizedBox(
-      height: 44,
+      height: widget.suggestionBarHeight,
       child: Row(
         children: [
           if (undo != null)
@@ -1708,12 +1744,30 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     KeyboardLayout resolvedLayout,
   ) {
     final media = MediaQuery.of(context);
-    final maximumHeight = math.min(media.size.height * .55, 440).toDouble();
-    final minimumHeight = maximumHeight < 270 ? maximumHeight : 270.0;
+    final controlBarHeight = widget.showControlBar
+        ? widget.suggestionBarHeight
+        : 0.0;
+    final dragHandleHeight =
+        widget.presentation == OnscreenKeyboardPresentation.overlay &&
+            widget.overlayDragEnabled
+        ? _overlayDragHandleHeight
+        : 0.0;
+    final chromeHeight = controlBarHeight + dragHandleHeight;
+    final legacyChromeHeight = widget.showControlBar ? 44.0 : 0.0;
+    final additionalChrome = math
+        .max(0, chromeHeight - legacyChromeHeight)
+        .toDouble();
+    final legacyMaximum = math.min(media.size.height * .55, 440).toDouble();
+    final maximumHeight = math.min(
+      media.size.height * .65,
+      legacyMaximum + additionalChrome,
+    );
+    final minimumHeight = math.min(maximumHeight, 270 + additionalChrome);
     final calculatedHeight =
-        (media.size.width / resolvedLayout.aspectRatio +
-                (widget.showControlBar ? 44 : 0))
-            .clamp(minimumHeight, maximumHeight);
+        (media.size.width / resolvedLayout.aspectRatio + chromeHeight).clamp(
+          minimumHeight,
+          maximumHeight,
+        );
     return widget.dockedHeight?.call(context) ?? calculatedHeight;
   }
 
@@ -1759,11 +1813,93 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     );
   }
 
+  double _overlayTop(double surfaceHeight, double panelHeight) =>
+      math.max(0, surfaceHeight - panelHeight) * _overlayVerticalPosition;
+
+  void _setOverlayVerticalPosition(double position) {
+    final next = position.clamp(0.0, 1.0);
+    if (next == _overlayVerticalPosition) return;
+    setState(() => _overlayVerticalPosition = next);
+  }
+
+  void _endOverlayDrag() {
+    _draggingListener.value = false;
+    _ensureActiveFieldVisible();
+  }
+
+  String _overlayPositionLabel(double delta) {
+    final position = (_overlayVerticalPosition + delta).clamp(0.0, 1.0);
+    return '${(position * 100).round()}% from top';
+  }
+
+  Widget _buildOverlayDragHandle(BuildContext context, double availableTravel) {
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'Move keyboard',
+      value: _overlayPositionLabel(0),
+      increasedValue: _overlayPositionLabel(.1),
+      decreasedValue: _overlayPositionLabel(-.1),
+      slider: true,
+      onIncrease: () {
+        _setOverlayVerticalPosition(_overlayVerticalPosition + .1);
+        _ensureActiveFieldVisible();
+      },
+      onDecrease: () {
+        _setOverlayVerticalPosition(_overlayVerticalPosition - .1);
+        _ensureActiveFieldVisible();
+      },
+      child: ValueListenableBuilder<bool>(
+        valueListenable: _draggingListener,
+        builder: (context, dragging, child) => MouseRegion(
+          cursor: dragging
+              ? SystemMouseCursors.grabbing
+              : SystemMouseCursors.grab,
+          child: GestureDetector(
+            key: const ValueKey('onscreen_keyboard_overlay_drag_handle'),
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragStart: (_) => _draggingListener.value = true,
+            onVerticalDragCancel: _endOverlayDrag,
+            onVerticalDragUpdate: (details) {
+              if (availableTravel <= 0) return;
+              _setOverlayVerticalPosition(
+                _overlayVerticalPosition + details.delta.dy / availableTravel,
+              );
+            },
+            onVerticalDragEnd: (_) => _endOverlayDrag(),
+            child: child,
+          ),
+        ),
+        child: SizedBox(
+          height: _overlayDragHandleHeight,
+          width: double.infinity,
+          child: Center(
+            child: ExcludeSemantics(
+              child:
+                  widget.dragHandle ??
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: colors.onSurfaceVariant.withValues(alpha: .65),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    child: const SizedBox(width: 40, height: 4),
+                  ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildOverlay(BuildContext context, KeyboardLayout resolvedLayout) {
     final media = MediaQuery.of(context);
     final reducedMotion = media.disableAnimations;
     final keyboardVisible = widget.enabled && _visible;
     final targetHeight = _phonePanelHeight(context, resolvedLayout);
+    final availableTravel = math
+        .max(0, media.size.height - targetHeight)
+        .toDouble();
+    final restingTranslation =
+        -availableTravel * (1 - _overlayVerticalPosition);
     return TweenAnimationBuilder<double>(
       duration: reducedMotion
           ? Duration.zero
@@ -1777,17 +1913,27 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           MediaQuery(data: media, child: widget.child),
           Align(
             alignment: Alignment.bottomCenter,
-            child: SizedBox(
-              width: double.infinity,
-              height: targetHeight,
-              child: ClipRect(
-                child: Transform.translate(
-                  offset: Offset(0, targetHeight * (1 - progress)),
+            child: Transform.translate(
+              offset: Offset(
+                0,
+                restingTranslation +
+                    (targetHeight - restingTranslation) * (1 - progress),
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                height: targetHeight,
+                child: ClipRect(
                   child: IgnorePointer(
                     ignoring: !keyboardVisible,
                     child: ExcludeSemantics(
                       excluding: !keyboardVisible,
-                      child: _buildDockedPanel(context, resolvedLayout),
+                      child: _buildDockedPanel(
+                        context,
+                        resolvedLayout,
+                        overlayHandle: widget.overlayDragEnabled
+                            ? _buildOverlayDragHandle(context, availableTravel)
+                            : null,
+                      ),
                     ),
                   ),
                 ),
@@ -1801,8 +1947,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   Widget _buildDockedPanel(
     BuildContext context,
-    KeyboardLayout resolvedLayout,
-  ) {
+    KeyboardLayout resolvedLayout, {
+    Widget? overlayHandle,
+  }) {
     final theme = context.theme;
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.3,
@@ -1815,6 +1962,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
               padding: theme.padding ?? EdgeInsets.zero,
               child: Column(
                 children: [
+                  ?overlayHandle,
                   if (widget.showControlBar) _buildSuggestionBar(context),
                   Expanded(
                     child: RawOnscreenKeyboard(
@@ -1853,6 +2001,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   final GlobalKey _keyboardKey = GlobalKey();
   final GlobalKey _phoneSurfaceKey = GlobalKey();
+  static const double _overlayDragHandleHeight = 28;
+  double _overlayVerticalPosition = 1;
 
   /// Alignment of the keyboard
   final ValueNotifier<(double, double)> _alignListener = ValueNotifier((.5, 1));

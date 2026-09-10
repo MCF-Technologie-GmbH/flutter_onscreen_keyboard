@@ -1,3 +1,12 @@
+## 0.9.0-mcf.1
+
+- Add opt-in, vertically draggable overlay keyboards with bounded direct
+  manipulation, accessible adjustment actions, and controller alignment.
+- Add configurable phone suggestion/utility bar height while preserving the
+  existing 44-pixel default.
+- Keep application constraints unchanged and recalculate focus visibility for
+  the overlay's released position.
+
 ## 0.8.0-mcf.1
 
 - Add an opt-in full-width `overlay` presentation that leaves application

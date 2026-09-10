@@ -70,6 +70,8 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
       ),
       builder: (context, child) => OnscreenKeyboard(
         presentation: OnscreenKeyboardPresentation.overlay,
+        overlayDragEnabled: true,
+        suggestionBarHeight: 56,
         typingMode: _typingMode,
         locale: _locale,
         languageModel: _languageModel,

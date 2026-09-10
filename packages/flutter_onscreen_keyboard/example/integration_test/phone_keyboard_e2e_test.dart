@@ -152,7 +152,38 @@ void main() {
     expect(_textOf(tester, field), 'QwERt\n');
   });
 
-  testWidgets('hide and reopen retargets an interrupted dock transition', (
+  testWidgets('touch drag handle repositions the overlay keyboard', (
+    tester,
+  ) async {
+    await _startPlayground(tester);
+    final handle = find.byKey(
+      const ValueKey('onscreen_keyboard_overlay_drag_handle'),
+    );
+    expect(handle.hitTestable(), findsOneWidget);
+    final before = tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy;
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(handle),
+      // Kept explicit: this scenario verifies the touch pointer path.
+      // ignore: avoid_redundant_argument_values
+      kind: PointerDeviceKind.touch,
+    );
+    await gesture.moveBy(const Offset(0, -120));
+    await tester.pump(const Duration(milliseconds: 16));
+    final duringDrag = tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy;
+    expect(duringDrag, lessThan(before - 70));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy,
+      closeTo(duringDrag, .1),
+    );
+    expect(find.bySemanticsLabel('Move keyboard'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('hide and reopen retargets an interrupted overlay transition', (
     tester,
   ) async {
     await _startPlayground(tester);
