@@ -1,3 +1,12 @@
+## 0.8.0-mcf.1
+
+- Add an opt-in full-width `overlay` presentation that leaves application
+  constraints unchanged while the phone keyboard appears above the UI.
+- Keep covered fields visible by scrolling the nearest vertical scrollable
+  above the overlay without introducing a viewport inset.
+- Use a retargetable 180 ms transform-only transition, with an instantaneous
+  reduced-motion path and safe pointer/semantics suppression while hidden.
+
 ## 0.7.1-mcf.1
 
 - Shift: only a tap that arms shift from off can start the caps lock double

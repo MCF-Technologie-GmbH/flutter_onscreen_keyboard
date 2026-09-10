@@ -69,7 +69,7 @@ class _KeyboardPlaygroundState extends State<KeyboardPlayground> {
         ),
       ),
       builder: (context, child) => OnscreenKeyboard(
-        presentation: OnscreenKeyboardPresentation.docked,
+        presentation: OnscreenKeyboardPresentation.overlay,
         typingMode: _typingMode,
         locale: _locale,
         languageModel: _languageModel,

@@ -129,7 +129,9 @@ class OnscreenKeyboard extends StatefulWidget {
   /// Minimum score separation from the runner-up for automatic insertion.
   final double minimumSwipeScoreMargin;
 
-  /// Optional dock height. Defaults to a responsive viewport fraction.
+  /// Optional docked or overlay phone-keyboard height.
+  ///
+  /// Defaults to a responsive viewport fraction.
   final HeightGetter? dockedHeight;
 
   /// A builder to wrap the app with [OnscreenKeyboard].
@@ -1067,7 +1069,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   void _ensureActiveFieldVisible() {
-    if (widget.presentation != OnscreenKeyboardPresentation.docked) return;
+    if (!_usesPhonePresentation) return;
     final field = activeTextField;
     if (field == null) return;
     final reducedMotion =
@@ -1102,6 +1104,35 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       axis: Axis.vertical,
     );
     if (renderObject == null || scrollable == null) return;
+    if (widget.presentation == OnscreenKeyboardPresentation.overlay &&
+        renderObject is RenderBox) {
+      final surface = _phoneSurfaceKey.currentContext?.findRenderObject();
+      if (surface is RenderBox) {
+        final fieldBottom = renderObject
+            .localToGlobal(
+              Offset(0, renderObject.size.height),
+              ancestor: surface,
+            )
+            .dy;
+        final keyboardTop =
+            surface.size.height - _phonePanelHeight(context, _resolveLayout());
+        final overlap = fieldBottom - (keyboardTop - 12);
+        if (overlap > 0) {
+          final target = (scrollable.position.pixels + overlap).clamp(
+            scrollable.position.minScrollExtent,
+            scrollable.position.maxScrollExtent,
+          );
+          await scrollable.position.animateTo(
+            target,
+            duration: reducedMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            curve: const Cubic(.23, 1, .32, 1),
+          );
+        }
+        return;
+      }
+    }
     await scrollable.position.ensureVisible(
       renderObject,
       duration: reducedMotion
@@ -1327,8 +1358,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   /// Returns the default keyboard layout based on the current platform.
-  KeyboardLayout _getDefaultLayout() =>
-      widget.presentation == OnscreenKeyboardPresentation.docked
+  bool get _usesPhonePresentation =>
+      widget.presentation == OnscreenKeyboardPresentation.docked ||
+      widget.presentation == OnscreenKeyboardPresentation.overlay;
+
+  KeyboardLayout _getDefaultLayout() => _usesPhonePresentation
       ? PhoneKeyboardLayout(
           locale: _locale,
           fieldConfiguration: activeTextField?.fieldConfiguration,
@@ -1669,17 +1703,25 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     );
   }
 
-  Widget _buildDocked(BuildContext context, KeyboardLayout resolvedLayout) {
+  double _phonePanelHeight(
+    BuildContext context,
+    KeyboardLayout resolvedLayout,
+  ) {
     final media = MediaQuery.of(context);
-    final reducedMotion = media.disableAnimations;
-    final keyboardVisible = widget.enabled && _visible;
     final maximumHeight = math.min(media.size.height * .55, 440).toDouble();
     final minimumHeight = maximumHeight < 270 ? maximumHeight : 270.0;
     final calculatedHeight =
         (media.size.width / resolvedLayout.aspectRatio +
                 (widget.showControlBar ? 44 : 0))
             .clamp(minimumHeight, maximumHeight);
-    final targetHeight = widget.dockedHeight?.call(context) ?? calculatedHeight;
+    return widget.dockedHeight?.call(context) ?? calculatedHeight;
+  }
+
+  Widget _buildDocked(BuildContext context, KeyboardLayout resolvedLayout) {
+    final media = MediaQuery.of(context);
+    final reducedMotion = media.disableAnimations;
+    final keyboardVisible = widget.enabled && _visible;
+    final targetHeight = _phonePanelHeight(context, resolvedLayout);
     return TweenAnimationBuilder<double>(
       duration: reducedMotion
           ? Duration.zero
@@ -1687,6 +1729,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       curve: const Cubic(.23, 1, .32, 1),
       tween: Tween(end: keyboardVisible ? targetHeight : 0),
       builder: (context, inset, _) => Stack(
+        key: _phoneSurfaceKey,
         fit: StackFit.expand,
         children: [
           MediaQuery(
@@ -1707,6 +1750,46 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                   minHeight: targetHeight,
                   maxHeight: targetHeight,
                   child: _buildDockedPanel(context, resolvedLayout),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverlay(BuildContext context, KeyboardLayout resolvedLayout) {
+    final media = MediaQuery.of(context);
+    final reducedMotion = media.disableAnimations;
+    final keyboardVisible = widget.enabled && _visible;
+    final targetHeight = _phonePanelHeight(context, resolvedLayout);
+    return TweenAnimationBuilder<double>(
+      duration: reducedMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
+      curve: const Cubic(.23, 1, .32, 1),
+      tween: Tween(end: keyboardVisible ? 1 : 0),
+      builder: (context, progress, _) => Stack(
+        key: _phoneSurfaceKey,
+        fit: StackFit.expand,
+        children: [
+          MediaQuery(data: media, child: widget.child),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SizedBox(
+              width: double.infinity,
+              height: targetHeight,
+              child: ClipRect(
+                child: Transform.translate(
+                  offset: Offset(0, targetHeight * (1 - progress)),
+                  child: IgnorePointer(
+                    ignoring: !keyboardVisible,
+                    child: ExcludeSemantics(
+                      excluding: !keyboardVisible,
+                      child: _buildDockedPanel(context, resolvedLayout),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1769,6 +1852,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   final GlobalKey _keyboardKey = GlobalKey();
+  final GlobalKey _phoneSurfaceKey = GlobalKey();
 
   /// Alignment of the keyboard
   final ValueNotifier<(double, double)> _alignListener = ValueNotifier((.5, 1));
@@ -1791,7 +1875,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final resolvedLayout = _resolveLayout();
     final resolvedTheme =
         widget.theme ??
-        (widget.presentation == OnscreenKeyboardPresentation.docked
+        (_usesPhonePresentation
             ? OnscreenKeyboardThemeData.phone(context)
             : const OnscreenKeyboardThemeData());
     if (!resolvedLayout.modes.containsKey(_mode)) {
@@ -1806,9 +1890,18 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       state: this,
       child: OnscreenKeyboardTheme(
         data: resolvedTheme,
-        child: widget.presentation == OnscreenKeyboardPresentation.docked
-            ? _RetargetableOverlay(child: _buildDocked(context, resolvedLayout))
-            : _buildFloating(context, resolvedLayout),
+        child: switch (widget.presentation) {
+          OnscreenKeyboardPresentation.docked => _RetargetableOverlay(
+            child: _buildDocked(context, resolvedLayout),
+          ),
+          OnscreenKeyboardPresentation.overlay => _RetargetableOverlay(
+            child: _buildOverlay(context, resolvedLayout),
+          ),
+          OnscreenKeyboardPresentation.floating => _buildFloating(
+            context,
+            resolvedLayout,
+          ),
+        },
       ),
     );
   }
@@ -2008,9 +2101,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 }
 
-/// Keeps the compatibility overlay supplied by floating presentation while
-/// allowing the docked subtree to retarget whenever runtime configuration,
-/// focus, visibility, or its animated inset changes.
+/// Keeps the app-level overlay available while a phone presentation retargets
+/// for runtime configuration, focus, visibility, or animation changes.
 class _RetargetableOverlay extends StatefulWidget {
   const _RetargetableOverlay({required this.child});
 
