@@ -5,7 +5,16 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_onscreen_keyboard/src/models/layout.dart';
 
 /// Controls how the keyboard is placed around the application.
-enum OnscreenKeyboardPresentation { floating, docked }
+enum OnscreenKeyboardPresentation {
+  /// Compatibility presentation: a movable keyboard above the application.
+  floating,
+
+  /// A full-width phone keyboard that reserves space below the application.
+  docked,
+
+  /// A full-width phone keyboard above the application without resizing it.
+  overlay,
+}
 
 /// Controls offline language assistance.
 enum OnscreenKeyboardTypingMode { off, suggestions, autocorrect }

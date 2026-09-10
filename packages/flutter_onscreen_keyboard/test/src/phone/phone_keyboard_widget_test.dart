@@ -48,6 +48,118 @@ void main() {
     expect(find.byType(RawOnscreenKeyboard), findsOneWidget);
   });
 
+  testWidgets('overlay phone keyboard covers content without resizing it', (
+    tester,
+  ) async {
+    final childKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          child: SizedBox.expand(
+            key: childKey,
+            child: const Scaffold(body: OnscreenKeyboardTextField()),
+          ),
+        ),
+      ),
+    );
+    final before = tester.getRect(find.byKey(childKey));
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    final after = tester.getRect(find.byKey(childKey));
+    final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+    expect(after, before);
+    expect(keyboard.bottom, lessThanOrEqualTo(after.bottom));
+    expect(keyboard.bottom, greaterThan(after.bottom - 24));
+    expect(keyboard.top, lessThan(after.bottom));
+    expect(after.bottom, greaterThan(keyboard.top));
+  });
+
+  testWidgets('overlay keyboard scrolls a covered field above its panel', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 640);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final focusNode = FocusNode();
+    addTearDown(focusNode.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          child: Scaffold(
+            body: ListView(
+              children: [
+                const SizedBox(height: 400),
+                OnscreenKeyboardTextField(focusNode: focusNode),
+                const SizedBox(height: 700),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    focusNode.requestFocus();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 190));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+
+    final field = tester.getRect(find.byType(OnscreenKeyboardTextField));
+    final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+    final scrollable = tester.getRect(find.byType(ListView));
+    expect(field.bottom, lessThanOrEqualTo(keyboard.top - 11));
+    expect(scrollable.bottom, greaterThan(keyboard.top));
+  });
+
+  testWidgets('overlay transition retargets without resizing the application', (
+    tester,
+  ) async {
+    final childKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          child: SizedBox.expand(
+            key: childKey,
+            child: const Scaffold(body: OnscreenKeyboardTextField()),
+          ),
+        ),
+      ),
+    );
+    final initialSize = tester.getSize(find.byKey(childKey));
+    final keyboard = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    );
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    final openingTop = tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy;
+
+    keyboard.hide();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final closingTop = tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy;
+    expect(closingTop, greaterThan(openingTop));
+
+    keyboard.open();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 40));
+    final reopenedTop = tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy;
+    expect(reopenedTop, lessThan(closingTop));
+
+    await tester.pumpAndSettle();
+    expect(tester.getSize(find.byKey(childKey)), initialSize);
+    expect(keyboard.isVisible, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('docked keyboard remains valid in a short landscape viewport', (
     tester,
   ) async {
@@ -186,6 +298,46 @@ void main() {
     );
     expect(animation.duration, Duration.zero);
     expect(animation.tween.end, greaterThan(200));
+  });
+
+  testWidgets('reduced motion shows the overlay without resizing content', (
+    tester,
+  ) async {
+    final childKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: OnscreenKeyboard(
+              presentation: OnscreenKeyboardPresentation.overlay,
+              child: SizedBox.expand(
+                key: childKey,
+                child: const Scaffold(body: OnscreenKeyboardTextField()),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    final before = tester.getRect(find.byKey(childKey));
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pump();
+
+    final animation = tester.widget<TweenAnimationBuilder<double>>(
+      find.byWidgetPredicate(
+        (widget) => widget is TweenAnimationBuilder<double>,
+      ),
+    );
+    expect(animation.duration, Duration.zero);
+    expect(animation.tween.end, 1);
+    expect(tester.getRect(find.byKey(childKey)), before);
+    final keyboardBottom = tester
+        .getBottomRight(find.byType(RawOnscreenKeyboard))
+        .dy;
+    expect(keyboardBottom, lessThanOrEqualTo(before.bottom));
+    expect(keyboardBottom, greaterThan(before.bottom - 24));
   });
 
   testWidgets('docked transition retargets cleanly when interrupted', (
