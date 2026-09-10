@@ -160,6 +160,136 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('overlay handle moves vertically without resizing application', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(420, 700);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final childKey = GlobalKey();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          overlayDragEnabled: true,
+          child: SizedBox.expand(
+            key: childKey,
+            child: const Scaffold(body: OnscreenKeyboardTextField()),
+          ),
+        ),
+      ),
+    );
+    final childBefore = tester.getRect(find.byKey(childKey));
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pumpAndSettle();
+
+    final handle = find.byKey(
+      const ValueKey('onscreen_keyboard_overlay_drag_handle'),
+    );
+    expect(handle.hitTestable(), findsOneWidget);
+    expect(find.bySemanticsLabel('Move keyboard'), findsOneWidget);
+    final handleTopBefore = tester.getTopLeft(handle).dy;
+    final keyboardTopBefore = tester.getTopLeft(
+      find.byType(RawOnscreenKeyboard),
+    );
+
+    await tester.drag(handle, const Offset(0, -100));
+    await tester.pump();
+    final keyboardTopAfterUp = tester.getTopLeft(
+      find.byType(RawOnscreenKeyboard),
+    );
+    expect(keyboardTopAfterUp.dy, lessThan(keyboardTopBefore.dy - 60));
+
+    await tester.drag(handle, const Offset(0, 55));
+    await tester.pump();
+    final keyboardTopAfterDown = tester.getTopLeft(
+      find.byType(RawOnscreenKeyboard),
+    );
+    expect(keyboardTopAfterDown.dy, greaterThan(keyboardTopAfterUp.dy + 25));
+    expect(tester.getRect(find.byKey(childKey)), childBefore);
+
+    final hideKeyboard = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    ).hide;
+    final openKeyboard = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    ).open;
+    hideKeyboard();
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(handle).dy, greaterThanOrEqualTo(700));
+    openKeyboard();
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byType(RawOnscreenKeyboard)).dy,
+      closeTo(keyboardTopAfterDown.dy, .1),
+    );
+
+    final moveKeyboardToTop = OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    ).moveToTop;
+    moveKeyboardToTop();
+    await tester.pump();
+    expect(tester.getTopLeft(handle).dy, lessThanOrEqualTo(2.1));
+
+    OnscreenKeyboard.of(
+      tester.element(find.byType(OnscreenKeyboardTextField)),
+    ).moveToBottom();
+    await tester.pump();
+    expect(tester.getTopLeft(handle).dy, closeTo(handleTopBefore, .1));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('phone suggestion bar supports a larger configured height', (
+    tester,
+  ) async {
+    const barKey = ValueKey('large-suggestion-bar');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          overlayDragEnabled: true,
+          suggestionBarHeight: 56,
+          suggestionBarBuilder: (_, _, _, _) =>
+              const ColoredBox(key: barKey, color: Colors.black),
+          child: const Scaffold(body: OnscreenKeyboardTextField()),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byKey(barKey)).height, 56);
+    expect(
+      find.byKey(const ValueKey('onscreen_keyboard_overlay_drag_handle')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('overlay dragging remains opt-in for compatibility', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: OnscreenKeyboard(
+          presentation: OnscreenKeyboardPresentation.overlay,
+          child: Scaffold(body: OnscreenKeyboardTextField()),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(OnscreenKeyboardTextField));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('onscreen_keyboard_overlay_drag_handle')),
+      findsNothing,
+    );
+  });
+
   testWidgets('docked keyboard remains valid in a short landscape viewport', (
     tester,
   ) async {

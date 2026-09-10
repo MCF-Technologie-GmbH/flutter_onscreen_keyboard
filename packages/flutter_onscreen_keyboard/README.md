@@ -8,6 +8,8 @@ the upstream floating keyboard as the default:
 ```dart
 OnscreenKeyboard(
   presentation: OnscreenKeyboardPresentation.overlay,
+  overlayDragEnabled: true,
+  suggestionBarHeight: 56,
   typingMode: OnscreenKeyboardTypingMode.suggestions,
   locale: const Locale('de'),
   languageModel: model,
@@ -16,9 +18,11 @@ OnscreenKeyboard(
 ```
 
 `overlay` anchors the full-width phone keyboard above the bottom of the app
-without changing the app's layout constraints. Use `docked` when the keyboard
-should instead reserve its own viewport space. The original movable `floating`
-presentation remains the package default for compatibility.
+without changing the app's layout constraints. Set `overlayDragEnabled` to add
+an accessible vertical drag handle; the keyboard stays where it is released.
+Use `suggestionBarHeight` to size the phone utility bar. Use `docked` when the
+keyboard should instead reserve its own viewport space. The original movable
+`floating` presentation remains the package default for compatibility.
 
 `PhoneKeyboardLayout` derives text, multiline, numeric, signed-decimal, phone,
 email, and URL behavior from `OnscreenKeyboardFieldConfiguration`. Language
