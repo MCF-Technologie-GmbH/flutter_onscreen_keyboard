@@ -170,23 +170,40 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     _row('123'),
     _row('456'),
     _row('789'),
-    KeyboardRow(
-      keys: [
-        if (signed) const OnscreenKeyboardKey.text(primary: '-'),
-        const OnscreenKeyboardKey.text(primary: '0'),
-        if (signed) const OnscreenKeyboardKey.text(primary: '.'),
-        const OnscreenKeyboardKey.action(
-          name: ActionKeyType.backspace,
-          child: Icon(Icons.backspace_outlined),
-          repeatable: true,
-        ),
-        OnscreenKeyboardKey.action(
-          name: ActionKeyType.enter,
-          label: _enterLabel(fieldConfiguration?.inputAction),
-          child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
-        ),
-      ],
-    ),
+    if (signed)
+      KeyboardRow(
+        keys: [
+          const OnscreenKeyboardKey.text(primary: '-'),
+          const OnscreenKeyboardKey.text(primary: '0'),
+          const OnscreenKeyboardKey.text(primary: '.'),
+          const OnscreenKeyboardKey.action(
+            name: ActionKeyType.backspace,
+            child: Icon(Icons.backspace_outlined),
+            repeatable: true,
+          ),
+          OnscreenKeyboardKey.action(
+            name: ActionKeyType.enter,
+            label: _enterLabel(fieldConfiguration?.inputAction),
+            child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
+          ),
+        ],
+      )
+    else
+      KeyboardRow(
+        keys: [
+          const OnscreenKeyboardKey.action(
+            name: ActionKeyType.backspace,
+            child: Icon(Icons.backspace_outlined),
+            repeatable: true,
+          ),
+          const OnscreenKeyboardKey.text(primary: '0'),
+          OnscreenKeyboardKey.action(
+            name: ActionKeyType.enter,
+            label: _enterLabel(fieldConfiguration?.inputAction),
+            child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
+          ),
+        ],
+      ),
   ];
 
   List<KeyboardRow> get _phoneRows => [
