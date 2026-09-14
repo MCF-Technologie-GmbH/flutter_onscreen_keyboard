@@ -263,6 +263,7 @@ void main() {
         home: OnscreenKeyboard(
           presentation: OnscreenKeyboardPresentation.overlay,
           overlayDragEnabled: true,
+          suggestionBarHeight: 56,
           child: SizedBox.expand(
             key: childKey,
             child: const Scaffold(body: OnscreenKeyboardTextField()),
