@@ -280,6 +280,11 @@ void main() {
     );
     expect(handle.hitTestable(), findsOneWidget);
     expect(find.bySemanticsLabel('Move keyboard'), findsOneWidget);
+    expect(
+      tester.getCenter(handle).dy,
+      closeTo(tester.getCenter(find.byIcon(Icons.keyboard_hide_rounded)).dy, 1),
+    );
+    expect(tester.getSize(handle).height, 56);
     final handleTopBefore = tester.getTopLeft(handle).dy;
     final keyboardTopBefore = tester.getTopLeft(
       find.byType(RawOnscreenKeyboard),
