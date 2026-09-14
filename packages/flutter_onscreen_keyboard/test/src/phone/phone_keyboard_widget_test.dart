@@ -286,6 +286,10 @@ void main() {
       closeTo(tester.getCenter(find.byIcon(Icons.keyboard_hide_rounded)).dy, 1),
     );
     expect(tester.getSize(handle).height, 56);
+    expect(
+      tester.getCenter(handle).dx,
+      closeTo(tester.getCenter(find.byType(RawOnscreenKeyboard)).dx, 1),
+    );
     final handleTopBefore = tester.getTopLeft(handle).dy;
     final keyboardTopBefore = tester.getTopLeft(
       find.byType(RawOnscreenKeyboard),
