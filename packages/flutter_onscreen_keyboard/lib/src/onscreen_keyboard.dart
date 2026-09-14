@@ -1696,9 +1696,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     if (overlayHandle != null) {
       return SizedBox(
         height: widget.suggestionBarHeight,
-        child: Row(
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            Expanded(child: _buildSuggestionBar(context)),
+            _buildSuggestionBar(context),
             SizedBox(width: 72, child: overlayHandle),
           ],
         ),
@@ -1711,40 +1712,54 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         child: builder(context, _suggestions, _acceptSuggestion, undo),
       );
     }
+    final predictions = Row(
+      children: [
+        if (undo != null)
+          IconButton(
+            onPressed: undo,
+            icon: const Icon(Icons.undo_rounded),
+            tooltip: 'Undo correction',
+          ),
+        for (final suggestion in _suggestions.take(3))
+          Expanded(
+            child: TextButton(
+              onPressed: () => _acceptSuggestion(suggestion),
+              onLongPress: () => forgetSuggestion(suggestion),
+              child: Text(
+                suggestion.word,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 15),
+              ),
+            ),
+          ),
+        if (_suggestions.isEmpty) const Spacer(),
+      ],
+    );
+    final controls = Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        IconButton(
+          onPressed: switchLocale,
+          icon: const Icon(Icons.language_rounded),
+          tooltip: _locale.languageCode.toUpperCase(),
+        ),
+        IconButton(
+          onPressed: hide,
+          icon: const Icon(Icons.keyboard_hide_rounded),
+          tooltip: 'Hide keyboard',
+        ),
+      ],
+    );
     return SizedBox(
       height: widget.suggestionBarHeight,
       child: Row(
         children: [
-          if (undo != null)
-            IconButton(
-              onPressed: undo,
-              icon: const Icon(Icons.undo_rounded),
-              tooltip: 'Undo correction',
-            ),
-          for (final suggestion in _suggestions.take(3))
-            Expanded(
-              child: TextButton(
-                onPressed: () => _acceptSuggestion(suggestion),
-                onLongPress: () => forgetSuggestion(suggestion),
-                child: Text(
-                  suggestion.word,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 15),
-                ),
-              ),
-            ),
-          if (_suggestions.isEmpty) const Spacer(),
-          IconButton(
-            onPressed: switchLocale,
-            icon: const Icon(Icons.language_rounded),
-            tooltip: _locale.languageCode.toUpperCase(),
-          ),
-          IconButton(
-            onPressed: hide,
-            icon: const Icon(Icons.keyboard_hide_rounded),
-            tooltip: 'Hide keyboard',
-          ),
+          Expanded(child: predictions),
+          if (widget.presentation == OnscreenKeyboardPresentation.overlay &&
+              widget.overlayDragEnabled)
+            const SizedBox(width: 72),
+          Expanded(child: controls),
         ],
       ),
     );
