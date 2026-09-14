@@ -1692,7 +1692,18 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         .toList(growable: false);
   }
 
-  Widget _buildSuggestionBar(BuildContext context) {
+  Widget _buildSuggestionBar(BuildContext context, {Widget? overlayHandle}) {
+    if (overlayHandle != null) {
+      return SizedBox(
+        height: widget.suggestionBarHeight,
+        child: Row(
+          children: [
+            Expanded(child: _buildSuggestionBar(context)),
+            SizedBox(width: 72, child: overlayHandle),
+          ],
+        ),
+      );
+    }
     final undo = _correctionBefore == null ? null : undoLastCorrection;
     if (widget.suggestionBarBuilder case final builder?) {
       return SizedBox(
@@ -1749,7 +1760,8 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         : 0.0;
     final dragHandleHeight =
         widget.presentation == OnscreenKeyboardPresentation.overlay &&
-            widget.overlayDragEnabled
+            widget.overlayDragEnabled &&
+            !widget.showControlBar
         ? _overlayDragHandleHeight
         : 0.0;
     final chromeHeight = controlBarHeight + dragHandleHeight;
@@ -1870,7 +1882,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           ),
         ),
         child: SizedBox(
-          height: _overlayDragHandleHeight,
+          height: widget.showControlBar
+              ? widget.suggestionBarHeight
+              : _overlayDragHandleHeight,
           width: double.infinity,
           child: Center(
             child: ExcludeSemantics(
@@ -1962,8 +1976,9 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
               padding: theme.padding ?? EdgeInsets.zero,
               child: Column(
                 children: [
-                  ?overlayHandle,
-                  if (widget.showControlBar) _buildSuggestionBar(context),
+                  if (!widget.showControlBar) ?overlayHandle,
+                  if (widget.showControlBar)
+                    _buildSuggestionBar(context, overlayHandle: overlayHandle),
                   Expanded(
                     child: RawOnscreenKeyboard(
                       aspectRatio: widget.aspectRatio,
