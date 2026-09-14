@@ -304,7 +304,11 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         ),
       ),
     };
-    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
+    child = theme.fitChild
+        ? FittedBox(child: child)
+        : Center(
+            child: FittedBox(fit: BoxFit.scaleDown, child: child),
+          );
     return Semantics(
       button: true,
       label: widget.textKey.getText(secondary: widget.showSecondary),
@@ -486,7 +490,11 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
         ),
       ),
     };
-    child = theme.fitChild ? FittedBox(child: child) : Center(child: child);
+    child = theme.fitChild
+        ? FittedBox(child: child)
+        : Center(
+            child: FittedBox(fit: BoxFit.scaleDown, child: child),
+          );
     final visuallyPressed =
         widget.pressed ||
         (widget.feedback.enableVisualFeedback && _pointer != null);
