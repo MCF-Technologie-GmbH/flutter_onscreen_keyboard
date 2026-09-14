@@ -102,8 +102,11 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
     }
     final rect = _popoverRect;
     if (_alternatesOverlay == null || rect == null) return;
+    final overlayBox =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final position = overlayBox.globalToLocal(event.position);
     final index =
-        ((event.position.dx - rect.left) /
+        ((position.dx - rect.left) /
                 (rect.width / widget.textKey.alternates.length))
             .floor()
             .clamp(0, widget.textKey.alternates.length - 1);
@@ -163,13 +166,15 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
 
   void _showAlternates() {
     _removeKeyPreview();
+    final overlay = Overlay.of(context);
+    final overlayBox = overlay.context.findRenderObject()! as RenderBox;
     final box = context.findRenderObject()! as RenderBox;
-    final origin = box.localToGlobal(Offset.zero);
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlayBox);
     // Accent alternates are picked by sliding a finger over them, so they
     // are drawn larger than the key itself.
     const itemWidth = 64.0;
     const height = 76.0;
-    final screenWidth = MediaQuery.sizeOf(context).width;
+    final screenWidth = overlayBox.size.width;
     final width = math.min(
       itemWidth * widget.textKey.alternates.length,
       screenWidth - 8,
@@ -213,7 +218,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         ),
       ),
     );
-    Overlay.of(context).insert(_alternatesOverlay!);
+    overlay.insert(_alternatesOverlay!);
   }
 
   @override
@@ -227,9 +232,13 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
 
   void _showKeyPreview() {
     _removeKeyPreview();
+    final overlay = Overlay.of(context);
+    final overlayBox = overlay.context.findRenderObject()! as RenderBox;
     final box = context.findRenderObject()! as RenderBox;
-    final origin = box.localToGlobal(Offset.zero);
-    final screenWidth = MediaQuery.sizeOf(context).width;
+    // Positioned and pointer selection must share the overlay's coordinate
+    // space, including when an ancestor rotates or scales the entire HMI.
+    final origin = box.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final screenWidth = overlayBox.size.width;
     final width = box.size.width.clamp(52.0, 72.0);
     const height = 58.0;
     final left = (origin.dx + (box.size.width - width) / 2).clamp(
@@ -263,7 +272,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         ),
       ),
     );
-    Overlay.of(context).insert(_keyPreviewOverlay!);
+    overlay.insert(_keyPreviewOverlay!);
   }
 
   void _removeKeyPreview() {

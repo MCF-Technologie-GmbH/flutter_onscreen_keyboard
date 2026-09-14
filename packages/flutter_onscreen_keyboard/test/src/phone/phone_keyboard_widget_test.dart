@@ -5,6 +5,96 @@ import 'package:flutter_onscreen_keyboard/flutter_onscreen_keyboard.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  for (final turns in [0, 1, 2, 3]) {
+    for (final scale in [1.0, 0.75]) {
+      testWidgets(
+        'popups use overlay coordinates: rotation $turns scale $scale',
+        (tester) async {
+          tester.view.physicalSize = const Size(1080, 1080);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final controller = TextEditingController();
+          addTearDown(controller.dispose);
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Padding(
+                padding: const EdgeInsets.fromLTRB(40, 60, 100, 80),
+                child: RotatedBox(
+                  quarterTurns: turns,
+                  child: Transform.scale(
+                    scale: scale,
+                    child: OnscreenKeyboard(
+                      presentation: OnscreenKeyboardPresentation.overlay,
+                      feedback: const OnscreenKeyboardFeedback(
+                        enableHaptics: false,
+                      ),
+                      child: Scaffold(
+                        body: OnscreenKeyboardTextField(controller: controller),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.tap(find.byType(OnscreenKeyboardTextField));
+          await tester.pumpAndSettle();
+          final key = find.byWidgetPredicate(
+            (widget) => widget is Semantics && widget.properties.label == 'g',
+          );
+          final overlay =
+              Overlay.of(tester.element(key)).context.findRenderObject()!
+                  as RenderBox;
+          Rect inOverlay(Finder finder) {
+            final box = tester.renderObject<RenderBox>(finder);
+            return MatrixUtils.transformRect(
+              box.getTransformTo(overlay),
+              Offset.zero & box.size,
+            );
+          }
+
+          final keyRect = inOverlay(key);
+          final press = await tester.startGesture(tester.getCenter(key));
+          await tester.pump();
+          final preview = find.byWidgetPredicate(
+            (widget) => widget is Material && widget.elevation == 5,
+          );
+          final previewRect = inOverlay(preview);
+          expect(previewRect.center.dx, closeTo(keyRect.center.dx, 1));
+          expect(previewRect.bottom, closeTo(keyRect.top - 5, 1));
+          await press.up();
+          await tester.pump();
+          expect(controller.text, 'g');
+          expect(preview, findsNothing);
+
+          final accentKey = find.byWidgetPredicate(
+            (widget) => widget is Semantics && widget.properties.label == 'a',
+          );
+          final accentRect = inOverlay(accentKey);
+          final hold = await tester.startGesture(tester.getCenter(accentKey));
+          await tester.pump(const Duration(milliseconds: 460));
+          final alternates = find.byWidgetPredicate(
+            (widget) => widget is Material && widget.elevation == 6,
+          );
+          final alternatesRect = inOverlay(alternates);
+          expect(alternatesRect.bottom, closeTo(accentRect.top - 8, 1));
+          expect(alternatesRect.left, greaterThanOrEqualTo(4));
+          expect(
+            alternatesRect.right,
+            lessThanOrEqualTo(overlay.size.width - 4),
+          );
+          await hold.moveTo(tester.getCenter(find.text('á')));
+          await tester.pump();
+          await hold.up();
+          await tester.pump();
+          expect(controller.text, 'gá');
+          expect(alternates, findsNothing);
+        },
+      );
+    }
+  }
+
   testWidgets('docked presentation retains the app-level overlay', (
     tester,
   ) async {
