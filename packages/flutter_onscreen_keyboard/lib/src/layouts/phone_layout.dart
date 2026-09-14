@@ -41,6 +41,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     return {
       'letters': KeyboardMode(rows: _letterRows),
       'symbols': KeyboardMode(rows: _symbolRows),
+      'symbolsMore': KeyboardMode(rows: _moreSymbolRows),
     };
   }
 
@@ -51,12 +52,6 @@ class PhoneKeyboardLayout extends KeyboardLayout {
       KeyboardRow(
         keys: [
           ...first.split('').map(_letter),
-          const OnscreenKeyboardKey.action(
-            name: ActionKeyType.backspace,
-            child: Icon(Icons.backspace_outlined),
-            flex: 26,
-            repeatable: true,
-          ),
         ],
       ),
       KeyboardRow(
@@ -69,10 +64,11 @@ class PhoneKeyboardLayout extends KeyboardLayout {
           const OnscreenKeyboardKey.action(
             name: ActionKeyType.shift,
             child: Icon(Icons.arrow_upward_rounded),
-            flex: 28,
+            flex: 56,
             canHold: true,
           ),
-          ...third.split('').map(_letter),
+          ...third.split('').map((key) => _letter(key, flex: 40)),
+          _backspace,
         ],
       ),
       KeyboardRow(
@@ -80,7 +76,7 @@ class PhoneKeyboardLayout extends KeyboardLayout {
           OnscreenKeyboardKey.action(
             name: ActionKeyType.modeSwitch,
             label: '?123',
-            onTap: (context) => context.controller.switchMode(),
+            onTap: (context) => context.controller.setModeNamed('symbols'),
             flex: 30,
           ),
           OnscreenKeyboardKey.action(
@@ -102,43 +98,75 @@ class PhoneKeyboardLayout extends KeyboardLayout {
 
   List<OnscreenKeyboardKey> get _contextKeys =>
       switch (fieldConfiguration?.inputKind) {
-        OnscreenKeyboardInputKind.email => const [
-          OnscreenKeyboardKey.text(primary: '@', flex: 24),
-          OnscreenKeyboardKey.text(
+        OnscreenKeyboardInputKind.email => [
+          _plain('@', flex: 24),
+          const OnscreenKeyboardKey.text(
             primary: ' ',
             child: Icon(Icons.space_bar_rounded),
             flex: 72,
           ),
-          OnscreenKeyboardKey.text(primary: '.'),
+          _plain('.'),
         ],
         OnscreenKeyboardInputKind.url => const [
           OnscreenKeyboardKey.text(primary: '/', flex: 22),
           OnscreenKeyboardKey.text(primary: ':', flex: 18),
           OnscreenKeyboardKey.text(primary: '.com', flex: 52),
         ],
-        _ => const [
-          OnscreenKeyboardKey.text(primary: ',', flex: 18),
-          OnscreenKeyboardKey.text(
+        _ => [
+          _plain(',', flex: 18),
+          const OnscreenKeyboardKey.text(
             primary: ' ',
             child: Icon(Icons.space_bar_rounded),
             flex: 92,
           ),
-          OnscreenKeyboardKey.text(primary: '.', flex: 18),
+          _plain('.', flex: 18),
         ],
       };
 
-  List<KeyboardRow> get _symbolRows => [
-    _row('1234567890'),
-    _row(r'@#$%&-+()'),
+  // Both third rows total 392 flex units: seven letters at 40 or eight
+  // symbols at 35, between two actions at 56. Backspace stays fixed.
+  static const _backspace = OnscreenKeyboardKey.action(
+    name: ActionKeyType.backspace,
+    child: Icon(Icons.backspace_outlined),
+    flex: 56,
+    repeatable: true,
+  );
+
+  List<KeyboardRow> get _symbolRows => _symbols(
+    first: '1234567890',
+    second: _german ? '@#€%&-+()' : r'@#$%&-+()',
+    third: const ['*', '/', '"', "'", ':', ';', '!', '?'],
+    pageLabel: r'=\<',
+    pageMode: 'symbolsMore',
+  );
+
+  List<KeyboardRow> get _moreSymbolRows => _symbols(
+    first: '~`|•√π÷×§°',
+    second: r'£¥$¢^_={}\',
+    third: const ['[', ']', '<', '>', '©', '®', '™', '±'],
+    pageLabel: '?123',
+    pageMode: 'symbols',
+  );
+
+  List<KeyboardRow> _symbols({
+    required String first,
+    required String second,
+    required List<String> third,
+    required String pageLabel,
+    required String pageMode,
+  }) => [
+    _row(first),
+    _row(second),
     KeyboardRow(
       keys: [
-        ...const ['*', '/', '"', "'", ':', ';', '!', '?'].map(_plain),
-        const OnscreenKeyboardKey.action(
-          name: ActionKeyType.backspace,
-          child: Icon(Icons.backspace_outlined),
-          flex: 28,
-          repeatable: true,
+        OnscreenKeyboardKey.action(
+          name: ActionKeyType.modeSwitch,
+          label: pageLabel,
+          onTap: (context) => context.controller.setModeNamed(pageMode),
+          flex: 56,
         ),
+        ...third.map((key) => _plain(key, flex: 35)),
+        _backspace,
       ],
     ),
     KeyboardRow(
@@ -146,16 +174,16 @@ class PhoneKeyboardLayout extends KeyboardLayout {
         OnscreenKeyboardKey.action(
           name: ActionKeyType.modeSwitch,
           label: 'ABC',
-          onTap: (context) => context.controller.switchMode(),
+          onTap: (context) => context.controller.setModeNamed('letters'),
           flex: 34,
         ),
-        const OnscreenKeyboardKey.text(primary: ',', flex: 18),
+        _plain(',', flex: 18),
         const OnscreenKeyboardKey.text(
           primary: ' ',
           child: Icon(Icons.space_bar_rounded),
           flex: 100,
         ),
-        const OnscreenKeyboardKey.text(primary: '.', flex: 18),
+        _plain('.', flex: 18),
         OnscreenKeyboardKey.action(
           name: ActionKeyType.enter,
           label: _enterLabel(fieldConfiguration?.inputAction),
@@ -235,13 +263,39 @@ class PhoneKeyboardLayout extends KeyboardLayout {
   KeyboardRow _row(String keys) =>
       KeyboardRow(keys: keys.split('').map(_plain).toList());
 
-  OnscreenKeyboardKey _plain(String key) =>
-      OnscreenKeyboardKey.text(primary: key);
+  OnscreenKeyboardKey _plain(String key, {int flex = 20}) {
+    final alternates = _symbolAlternates[key];
+    return OnscreenKeyboardKey.text(
+      primary: key,
+      flex: flex,
+      alternates: alternates == null ? const [] : [key, ...alternates],
+    );
+  }
 
-  OnscreenKeyboardKey _letter(String key) {
+  static const _symbolAlternates = <String, List<String>>{
+    '.': [',', '?', '!', ':', ';', '…'],
+    ',': [';', ':'],
+    '-': ['–', '—', '_'],
+    "'": ['‘', '’'],
+    '"': ['“', '”', '„', '«', '»'],
+    r'$': ['€', '£', '¥', '¢'],
+    '€': [r'$', '£', '¥', '¢'],
+    '£': ['€', r'$', '¥', '¢'],
+    '%': ['‰'],
+    '=': ['≠', '≈'],
+    '<': ['≤', '‹', '«'],
+    '>': ['≥', '›', '»'],
+    '1': ['¹', '½', '⅓', '¼'],
+    '2': ['²', '⅔'],
+    '3': ['³', '¾'],
+    '0': ['⁰', '°'],
+  };
+
+  OnscreenKeyboardKey _letter(String key, {int flex = 20}) {
     final alternates = _alternates[key];
     return OnscreenKeyboardKey.text(
       primary: key,
+      flex: flex,
       alternates: alternates == null ? const [] : [key, ...alternates],
     );
   }
