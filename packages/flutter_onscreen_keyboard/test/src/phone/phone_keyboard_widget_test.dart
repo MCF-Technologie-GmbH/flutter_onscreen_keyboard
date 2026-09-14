@@ -970,6 +970,30 @@ void main() {
     );
   });
 
+  testWidgets(
+    'number keypad places backspace, zero, and confirm left to right',
+    (
+      tester,
+    ) async {
+      final controller = TextEditingController();
+      await _pumpKeyboard(
+        tester,
+        controller: controller,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.done,
+      );
+
+      final backspace = tester.getCenter(find.byIcon(Icons.backspace_outlined));
+      final zero = tester.getCenter(find.text('0'));
+      final confirm = tester.getCenter(find.byIcon(Icons.done_rounded));
+
+      expect(backspace.dx, lessThan(zero.dx));
+      expect(zero.dx, lessThan(confirm.dx));
+      expect(backspace.dy, closeTo(zero.dy, 1));
+      expect(zero.dy, closeTo(confirm.dy, 1));
+    },
+  );
+
   testWidgets('key press shows an immediate visual preview', (tester) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
