@@ -994,6 +994,32 @@ void main() {
     },
   );
 
+  testWidgets('signed decimal keypad puts editing actions on a new row', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    await _pumpKeyboard(
+      tester,
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(
+        decimal: true,
+        signed: true,
+      ),
+      textInputAction: TextInputAction.done,
+    );
+
+    final minus = tester.getCenter(find.text('-'));
+    final zero = tester.getCenter(find.text('0'));
+    final decimal = tester.getCenter(find.text('.'));
+    final backspace = tester.getCenter(find.byIcon(Icons.backspace_outlined));
+    final confirm = tester.getCenter(find.byIcon(Icons.done_rounded));
+
+    expect(minus.dy, closeTo(zero.dy, 1));
+    expect(zero.dy, closeTo(decimal.dy, 1));
+    expect(backspace.dy, greaterThan(decimal.dy));
+    expect(backspace.dy, closeTo(confirm.dy, 1));
+  });
+
   testWidgets('key press shows an immediate visual preview', (tester) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);

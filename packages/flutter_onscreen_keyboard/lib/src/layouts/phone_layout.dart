@@ -170,12 +170,16 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     _row('123'),
     _row('456'),
     _row('789'),
-    if (signed)
+    if (signed) ...[
+      const KeyboardRow(
+        keys: [
+          OnscreenKeyboardKey.text(primary: '-'),
+          OnscreenKeyboardKey.text(primary: '0'),
+          OnscreenKeyboardKey.text(primary: '.'),
+        ],
+      ),
       KeyboardRow(
         keys: [
-          const OnscreenKeyboardKey.text(primary: '-'),
-          const OnscreenKeyboardKey.text(primary: '0'),
-          const OnscreenKeyboardKey.text(primary: '.'),
           const OnscreenKeyboardKey.action(
             name: ActionKeyType.backspace,
             child: Icon(Icons.backspace_outlined),
@@ -187,8 +191,8 @@ class PhoneKeyboardLayout extends KeyboardLayout {
             child: Icon(_enterIcon(fieldConfiguration?.inputAction)),
           ),
         ],
-      )
-    else
+      ),
+    ] else
       KeyboardRow(
         keys: [
           const OnscreenKeyboardKey.action(
