@@ -20,6 +20,7 @@ class OnscreenKeyboardThemeData {
     this.padding,
     this.textKeyThemeData = const TextKeyThemeData(),
     this.actionKeyThemeData = const ActionKeyThemeData(),
+    this.enterKeyThemeData,
     this.controlBarColor,
     this.useSafeArea,
   });
@@ -51,6 +52,11 @@ class OnscreenKeyboardThemeData {
   /// Theme data for styling action keys (e.g., Enter, Backspace, Shift).
   final ActionKeyThemeData actionKeyThemeData;
 
+  /// Optional styling for the Enter key alone, for example to highlight it as
+  /// the primary key. When `null`, Enter uses [actionKeyThemeData] like every
+  /// other action key.
+  final ActionKeyThemeData? enterKeyThemeData;
+
   /// The background color of the control bar.
   final Color? controlBarColor;
 
@@ -68,6 +74,7 @@ class OnscreenKeyboardThemeData {
     EdgeInsetsGeometry? padding,
     TextKeyThemeData? textKeyThemeData,
     ActionKeyThemeData? actionKeyThemeData,
+    ActionKeyThemeData? enterKeyThemeData,
     Color? controlBarColor,
     bool? useSafeArea,
   }) {
@@ -81,6 +88,7 @@ class OnscreenKeyboardThemeData {
       padding: padding ?? this.padding,
       textKeyThemeData: textKeyThemeData ?? this.textKeyThemeData,
       actionKeyThemeData: actionKeyThemeData ?? this.actionKeyThemeData,
+      enterKeyThemeData: enterKeyThemeData ?? this.enterKeyThemeData,
       controlBarColor: controlBarColor ?? this.controlBarColor,
       useSafeArea: useSafeArea ?? this.useSafeArea,
     );

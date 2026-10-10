@@ -458,7 +458,10 @@ class _ActionKeyWidgetState extends State<ActionKeyWidget> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final theme = context.theme.actionKeyThemeData;
+    final keyboardTheme = context.theme;
+    final theme = widget.actionKey.name == ActionKeyType.enter
+        ? keyboardTheme.enterKeyThemeData ?? keyboardTheme.actionKeyThemeData
+        : keyboardTheme.actionKeyThemeData;
     final isShift = widget.actionKey.name == ActionKeyType.shift;
     final capsLock = isShift && widget.capsLock;
     final visualChild = capsLock
