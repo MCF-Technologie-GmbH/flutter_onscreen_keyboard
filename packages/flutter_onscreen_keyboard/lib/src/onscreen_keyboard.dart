@@ -821,10 +821,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     _correctionPreviousWords = const [];
   }
 
-  bool _safeToCorrect(
-    String word, {
-    required bool automaticallyCapitalized,
-  }) {
+  bool _safeToCorrect(String word, {required bool automaticallyCapitalized}) {
     final lowercase = word.toLowerCase();
     final hasAutomaticInitialCapital =
         automaticallyCapitalized &&
@@ -1817,7 +1814,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
             data: media,
             child: Padding(
               padding: EdgeInsets.only(bottom: inset),
-              child: widget.child,
+              child: OnscreenKeyboardObscuredArea(
+                rect: Rect.zero,
+                child: widget.child,
+              ),
             ),
           ),
           Align(
@@ -1935,44 +1935,85 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           : const Duration(milliseconds: 180),
       curve: const Cubic(.23, 1, .32, 1),
       tween: Tween(end: keyboardVisible ? 1 : 0),
-      builder: (context, progress, _) => Stack(
-        key: _phoneSurfaceKey,
-        fit: StackFit.expand,
-        children: [
-          MediaQuery(data: media, child: widget.child),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: Transform.translate(
-              offset: Offset(
-                0,
-                restingTranslation +
-                    (targetHeight - restingTranslation) * (1 - progress),
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                height: targetHeight,
-                child: ClipRect(
-                  child: IgnorePointer(
-                    ignoring: !keyboardVisible,
-                    child: ExcludeSemantics(
-                      excluding: !keyboardVisible,
-                      child: _buildDockedPanel(
-                        context,
-                        resolvedLayout,
-                        overlayHandle: widget.overlayDragEnabled
-                            ? _buildOverlayDragHandle(context, availableTravel)
-                            : null,
-                      ),
-                    ),
+      builder: (context, progress, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final translation =
+              restingTranslation +
+              (targetHeight - restingTranslation) * (1 - progress);
+          final surfaceHeight = constraints.maxHeight;
+          final panelTop = surfaceHeight - targetHeight + translation;
+          final coveredTop = panelTop.clamp(0.0, surfaceHeight);
+          final coveredBottom = (panelTop + targetHeight).clamp(
+            0.0,
+            surfaceHeight,
+          );
+          final covered = coveredBottom > coveredTop
+              ? Rect.fromLTRB(
+                  0,
+                  coveredTop,
+                  constraints.maxWidth,
+                  coveredBottom,
+                )
+              : Rect.zero;
+          return _buildOverlaySurface(
+            context,
+            resolvedLayout,
+            media: media,
+            covered: covered,
+            translation: translation,
+            targetHeight: targetHeight,
+            availableTravel: availableTravel,
+            keyboardVisible: keyboardVisible,
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildOverlaySurface(
+    BuildContext context,
+    KeyboardLayout resolvedLayout, {
+    required MediaQueryData media,
+    required Rect covered,
+    required double translation,
+    required double targetHeight,
+    required double availableTravel,
+    required bool keyboardVisible,
+  }) => Stack(
+    key: _phoneSurfaceKey,
+    fit: StackFit.expand,
+    children: [
+      OnscreenKeyboardObscuredArea(
+        rect: covered,
+        child: MediaQuery(data: media, child: widget.child),
+      ),
+      Align(
+        alignment: Alignment.bottomCenter,
+        child: Transform.translate(
+          offset: Offset(0, translation),
+          child: SizedBox(
+            width: double.infinity,
+            height: targetHeight,
+            child: ClipRect(
+              child: IgnorePointer(
+                ignoring: !keyboardVisible,
+                child: ExcludeSemantics(
+                  excluding: !keyboardVisible,
+                  child: _buildDockedPanel(
+                    context,
+                    resolvedLayout,
+                    overlayHandle: widget.overlayDragEnabled
+                        ? _buildOverlayDragHandle(context, availableTravel)
+                        : null,
                   ),
                 ),
               ),
             ),
           ),
-        ],
+        ),
       ),
-    );
-  }
+    ],
+  );
 
   Widget _buildDockedPanel(
     BuildContext context,
@@ -2095,7 +2136,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
             child: Stack(
               children: [
                 // the app widget
-                widget.child,
+                OnscreenKeyboardObscuredArea(
+                  rect: Rect.zero,
+                  child: widget.child,
+                ),
 
                 // keyboard
                 if (widget.enabled && _visible)
