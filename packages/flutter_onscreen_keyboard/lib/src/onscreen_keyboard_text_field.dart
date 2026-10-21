@@ -35,6 +35,7 @@ class OnscreenKeyboardTextField extends StatefulWidget {
     this.enableOnscreenKeyboard = true,
     this.onscreenKeyboardMode,
     this.onscreenKeyboardLearningEnabled = true,
+    this.onscreenKeyboardOffersInfinity = false,
     this.groupId = EditableText,
     this.controller,
     this.focusNode,
@@ -137,6 +138,11 @@ class OnscreenKeyboardTextField extends StatefulWidget {
 
   /// Whether accepted words from this field may be learned locally.
   final bool onscreenKeyboardLearningEnabled;
+
+  /// Whether the signed decimal number pad offers an infinity choice
+  /// ([onscreenKeyboardInfinity]) when the `0` key is long-pressed. The
+  /// inserted text passes through [inputFormatters] like any other key.
+  final bool onscreenKeyboardOffersInfinity;
 
   /// The configuration for the magnifier of this text field.
   ///
@@ -789,6 +795,7 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
         enableSuggestions: widget.enableSuggestions,
         autocorrect: widget.autocorrect ?? true,
         learningEnabled: widget.onscreenKeyboardLearningEnabled,
+        offersInfinity: widget.onscreenKeyboardOffersInfinity,
         inputFormatters: widget.inputFormatters,
       );
 

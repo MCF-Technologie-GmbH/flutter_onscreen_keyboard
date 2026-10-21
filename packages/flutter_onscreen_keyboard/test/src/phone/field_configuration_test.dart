@@ -19,6 +19,32 @@ void main() {
     );
   });
 
+  test('offers infinity on the signed number pad 0 key only when asked', () {
+    List<String> zeroAlternates({required bool offersInfinity}) {
+      final field = OnscreenKeyboardFieldConfiguration.fromFlutter(
+        keyboardType: const TextInputType.numberWithOptions(
+          signed: true,
+          decimal: true,
+        ),
+        offersInfinity: offersInfinity,
+      );
+      final keys = PhoneKeyboardLayout(
+        fieldConfiguration: field,
+      ).modes['numbers']!.rows.expand((row) => row.keys).whereType<TextKey>();
+      return keys.singleWhere((key) => key.primary == '0').alternates;
+    }
+
+    expect(zeroAlternates(offersInfinity: false), isEmpty);
+    expect(
+      zeroAlternates(offersInfinity: true),
+      ['0', onscreenKeyboardInfinity],
+    );
+    expect(
+      OnscreenKeyboardFieldConfiguration.fromFlutter().offersInfinity,
+      isFalse,
+    );
+  });
+
   test('suppresses language behavior for sensitive and restricted fields', () {
     final password = OnscreenKeyboardFieldConfiguration.fromFlutter(
       obscureText: true,

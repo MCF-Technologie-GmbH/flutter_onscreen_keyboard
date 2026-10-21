@@ -1120,6 +1120,46 @@ void main() {
     expect(backspace.dy, closeTo(confirm.dy, 1));
   });
 
+  for (final offersInfinity in [false, true]) {
+    testWidgets(
+      'long-pressing 0 on the signed decimal keypad '
+      '${offersInfinity ? 'offers' : 'does not offer'} infinity',
+      (tester) async {
+        final controller = TextEditingController(text: '12')
+          ..selection = const TextSelection.collapsed(offset: 2);
+        await _pumpKeyboard(
+          tester,
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
+          offersInfinity: offersInfinity,
+        );
+
+        final hold = await tester.startGesture(
+          tester.getCenter(find.text('0')),
+        );
+        await tester.pump(const Duration(milliseconds: 460));
+        final choice = find.text(onscreenKeyboardInfinity);
+        if (!offersInfinity) {
+          expect(choice, findsNothing);
+          await hold.up();
+          await tester.pump();
+          expect(controller.text, '120');
+          return;
+        }
+        expect(choice, findsOneWidget);
+        await hold.moveTo(tester.getCenter(choice));
+        await tester.pump();
+        await hold.up();
+        await tester.pump();
+        expect(controller.text, '12$onscreenKeyboardInfinity');
+        expect(choice, findsNothing);
+      },
+    );
+  }
+
   testWidgets('key press shows an immediate visual preview', (tester) async {
     final controller = TextEditingController();
     await _pumpKeyboard(tester, controller: controller);
@@ -1406,6 +1446,7 @@ Future<void> _pumpKeyboard(
   int? minLines,
   int? maxLines = 1,
   bool swipeTypingEnabled = true,
+  bool offersInfinity = false,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -1422,6 +1463,7 @@ Future<void> _pumpKeyboard(
             textInputAction: textInputAction,
             minLines: minLines,
             maxLines: maxLines,
+            onscreenKeyboardOffersInfinity: offersInfinity,
           ),
         ),
       ),

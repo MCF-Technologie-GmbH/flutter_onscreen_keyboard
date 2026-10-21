@@ -199,11 +199,16 @@ class PhoneKeyboardLayout extends KeyboardLayout {
     _row('456'),
     _row('789'),
     if (signed) ...[
-      const KeyboardRow(
+      KeyboardRow(
         keys: [
-          OnscreenKeyboardKey.text(primary: '-'),
-          OnscreenKeyboardKey.text(primary: '0'),
-          OnscreenKeyboardKey.text(primary: '.'),
+          const OnscreenKeyboardKey.text(primary: '-'),
+          OnscreenKeyboardKey.text(
+            primary: '0',
+            alternates: (fieldConfiguration?.offersInfinity ?? false)
+                ? const ['0', onscreenKeyboardInfinity]
+                : const [],
+          ),
+          const OnscreenKeyboardKey.text(primary: '.'),
         ],
       ),
       KeyboardRow(

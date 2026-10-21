@@ -33,6 +33,10 @@ class OnscreenKeyboardEditingGestures {
   final bool wordDelete;
 }
 
+/// Text inserted when the operator picks the infinity choice of the number
+/// pad (see [OnscreenKeyboardFieldConfiguration.offersInfinity]).
+const String onscreenKeyboardInfinity = '∞';
+
 /// Coarse input categories used by phone layouts and prediction safeguards.
 enum OnscreenKeyboardInputKind {
   text,
@@ -57,6 +61,7 @@ class OnscreenKeyboardFieldConfiguration {
     required this.autocorrect,
     required this.learningEnabled,
     required this.formatterRestricted,
+    this.offersInfinity = false,
   });
 
   factory OnscreenKeyboardFieldConfiguration.fromFlutter({
@@ -69,6 +74,7 @@ class OnscreenKeyboardFieldConfiguration {
     bool autocorrect = true,
     bool learningEnabled = true,
     List<TextInputFormatter>? inputFormatters,
+    bool offersInfinity = false,
   }) {
     final multiline = maxLines != 1 || keyboardType == TextInputType.multiline;
     final kind = switch (keyboardType) {
@@ -95,6 +101,7 @@ class OnscreenKeyboardFieldConfiguration {
       autocorrect: autocorrect,
       learningEnabled: learningEnabled,
       formatterRestricted: inputFormatters?.isNotEmpty ?? false,
+      offersInfinity: offersInfinity,
     );
   }
 
@@ -107,6 +114,10 @@ class OnscreenKeyboardFieldConfiguration {
   final bool autocorrect;
   final bool learningEnabled;
   final bool formatterRestricted;
+
+  /// Whether the signed decimal number pad offers [onscreenKeyboardInfinity]
+  /// as a long-press choice on its `0` key. Off by default.
+  final bool offersInfinity;
 
   bool get isLanguageInput =>
       inputKind == OnscreenKeyboardInputKind.text ||
