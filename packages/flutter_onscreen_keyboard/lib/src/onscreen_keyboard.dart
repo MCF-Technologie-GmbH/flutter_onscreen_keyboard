@@ -51,6 +51,7 @@ class OnscreenKeyboard extends StatefulWidget {
     this.dockedHeight,
     this.overlayDragEnabled = false,
     this.enabled = true,
+    this.openOnTouchOnly = false,
   }) : assert(
          suggestionBarHeight > 0,
          'suggestionBarHeight must be greater than zero.',
@@ -64,6 +65,17 @@ class OnscreenKeyboard extends StatefulWidget {
   /// Disabling an open keyboard closes and detaches it immediately. Defaults
   /// to true for compatibility with earlier releases.
   final bool enabled;
+
+  /// Whether fields open the keyboard only for finger or pen input.
+  ///
+  /// When true, a field opens the keyboard on focus or press only when the
+  /// last input was a touch or stylus press. A focus reached with a mouse,
+  /// a trackpad or the Tab key leaves it closed, and pressing a text or
+  /// editing key on a hardware keyboard closes an open keyboard (the key
+  /// still reaches the focused field). A direct
+  /// [OnscreenKeyboardController.open] call always opens it. Defaults to false
+  /// for compatibility.
+  final bool openOnTouchOnly;
 
   /// The layout configuration for the keyboard.
   ///
@@ -182,6 +194,8 @@ class OnscreenKeyboard extends StatefulWidget {
   ///   If null, a default handle is shown.
   /// - [overlayDragEnabled]: Whether overlay presentation may be repositioned
   ///   vertically with its drag handle.
+  /// - [openOnTouchOnly]: Whether fields open the keyboard only for finger or
+  ///   pen input, and a hardware key closes it.
   /// - [suggestionBarHeight]: Height of the phone suggestion/utility bar.
   /// - [aspectRatio]: Determines the width-to-height ratio of the
   ///   keyboard widget.
@@ -219,6 +233,7 @@ class OnscreenKeyboard extends StatefulWidget {
     HeightGetter? dockedHeight,
     bool overlayDragEnabled = false,
     bool enabled = true,
+    bool openOnTouchOnly = false,
   }) => (context, child) {
     return OnscreenKeyboard(
       theme: theme,
@@ -244,6 +259,7 @@ class OnscreenKeyboard extends StatefulWidget {
       dockedHeight: dockedHeight,
       overlayDragEnabled: overlayDragEnabled,
       enabled: enabled,
+      openOnTouchOnly: openOnTouchOnly,
       child: child!,
     );
   };
@@ -1086,6 +1102,96 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
 
   @override
   bool get isVisible => widget.enabled && _visible;
+
+  /// Whether the last pointer press or hardware key the app received lets a
+  /// field open the keyboard by itself
+  /// (see [OnscreenKeyboard.openOnTouchOnly]).
+  /// Nothing has been pressed yet at start, so a field focused by the app
+  /// itself stays closed.
+  bool _lastInputAllowsOpen = false;
+
+  @override
+  bool allowsAutomaticOpen([PointerDeviceKind? pointerKind]) {
+    if (!widget.openOnTouchOnly) return true;
+    return pointerKind == null
+        ? _lastInputAllowsOpen
+        : _isTouchPointer(pointerKind);
+  }
+
+  static bool _isTouchPointer(PointerDeviceKind kind) => switch (kind) {
+    PointerDeviceKind.touch ||
+    PointerDeviceKind.stylus ||
+    PointerDeviceKind.invertedStylus => true,
+    PointerDeviceKind.mouse ||
+    PointerDeviceKind.trackpad ||
+    PointerDeviceKind.unknown => false,
+  };
+
+  /// Records how every press anywhere in the app happened. Runs as a global
+  /// pointer route, so it sees the press before the focus change it causes
+  /// is reported to the fields.
+  void _recordPointerInput(PointerEvent event) {
+    if (event is PointerDownEvent) {
+      _lastInputAllowsOpen = _isTouchPointer(event.kind);
+    }
+  }
+
+  /// Keys that only change how another key acts; pressing one alone neither
+  /// counts as typing on a hardware keyboard nor closes the keyboard.
+  static final Set<LogicalKeyboardKey> _modifierKeys = {
+    ...LogicalKeyboardKey.expandSynonyms({
+      LogicalKeyboardKey.shift,
+      LogicalKeyboardKey.control,
+      LogicalKeyboardKey.alt,
+      LogicalKeyboardKey.meta,
+    }),
+    LogicalKeyboardKey.shift,
+    LogicalKeyboardKey.control,
+    LogicalKeyboardKey.alt,
+    LogicalKeyboardKey.meta,
+    LogicalKeyboardKey.altGraph,
+    LogicalKeyboardKey.capsLock,
+    LogicalKeyboardKey.numLock,
+    LogicalKeyboardKey.scrollLock,
+    LogicalKeyboardKey.fn,
+    LogicalKeyboardKey.fnLock,
+  };
+
+  /// Editing and navigation keys that close the keyboard like a typed
+  /// character does.
+  static final Set<LogicalKeyboardKey> _editingKeys = {
+    LogicalKeyboardKey.backspace,
+    LogicalKeyboardKey.delete,
+    LogicalKeyboardKey.enter,
+    LogicalKeyboardKey.numpadEnter,
+    LogicalKeyboardKey.tab,
+    LogicalKeyboardKey.space,
+    LogicalKeyboardKey.arrowLeft,
+    LogicalKeyboardKey.arrowRight,
+    LogicalKeyboardKey.arrowUp,
+    LogicalKeyboardKey.arrowDown,
+    LogicalKeyboardKey.home,
+    LogicalKeyboardKey.end,
+    LogicalKeyboardKey.pageUp,
+    LogicalKeyboardKey.pageDown,
+  };
+
+  /// A hardware key press: the operator types on a real keyboard. With
+  /// [OnscreenKeyboard.openOnTouchOnly], a text or editing key closes the
+  /// open keyboard. The key is never consumed, so the focused field still
+  /// receives it.
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (_modifierKeys.contains(event.logicalKey)) return false;
+    _lastInputAllowsOpen = false;
+    final typesOrEdits =
+        (event.character?.isNotEmpty ?? false) ||
+        _editingKeys.contains(event.logicalKey);
+    if (widget.openOnTouchOnly && mounted && _visible && typesOrEdits) {
+      close();
+    }
+    return false;
+  }
 
   @override
   void open() {
@@ -2082,7 +2188,18 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   final ValueNotifier<bool> _draggingListener = ValueNotifier(false);
 
   @override
+  void initState() {
+    super.initState();
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_recordPointerInput);
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
+  }
+
+  @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(
+      _recordPointerInput,
+    );
     _requestToken?.cancel();
     _focusVisibilityTimer?.cancel();
     _activeTextField.dispose();

@@ -746,7 +746,7 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
   void _onFocusChanged() {
     if (!widget.enableOnscreenKeyboard) return;
     if (_effectiveFocusNode.hasPrimaryFocus) {
-      _attachAndOpenKeyboard();
+      if (_keyboard.allowsAutomaticOpen()) _attachAndOpenKeyboard();
     } else {
       _keyboard.close();
     }
@@ -764,7 +764,8 @@ class _OnscreenKeyboardTextFieldState extends State<OnscreenKeyboardTextField>
   void _onPointerDown(PointerDownEvent event) {
     if (widget.enableOnscreenKeyboard &&
         _effectiveFocusNode.hasPrimaryFocus &&
-        !_keyboard.isVisible) {
+        !_keyboard.isVisible &&
+        _keyboard.allowsAutomaticOpen(event.kind)) {
       _attachAndOpenKeyboard();
     }
   }
