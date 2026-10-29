@@ -18,6 +18,15 @@ abstract interface class OnscreenKeyboardController {
   /// Whether the keyboard is currently visible.
   bool get isVisible;
 
+  /// Whether a field may open the keyboard by itself for the current input.
+  ///
+  /// Always true unless [OnscreenKeyboard.openOnTouchOnly] is set. With it,
+  /// true only when [pointerKind] (or, when omitted, the last input the app
+  /// received) is a touch or stylus press; false after a mouse, trackpad or
+  /// hardware key input. Widgets that open the keyboard themselves with
+  /// [open] check this first to follow the same rule as the fields.
+  bool allowsAutomaticOpen([PointerDeviceKind? pointerKind]);
+
   /// The current layout of the onscreen keyboard.
   KeyboardLayout get layout;
 
