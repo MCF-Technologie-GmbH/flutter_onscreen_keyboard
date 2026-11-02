@@ -1201,7 +1201,7 @@ void main() {
     expect(controller.text, isEmpty);
   });
 
-  testWidgets('phone keys stay compact and backspace is in the top row', (
+  testWidgets('phone keys stay compact and backspace sits opposite shift', (
     tester,
   ) async {
     final controller = TextEditingController();
@@ -1209,10 +1209,17 @@ void main() {
 
     final q = tester.widget<Text>(find.text('q'));
     expect(q.style?.fontSize, 24);
-    expect(
-      tester.getCenter(find.byIcon(Icons.backspace_outlined)).dy,
-      lessThan(tester.getCenter(find.byIcon(Icons.arrow_upward_rounded)).dy),
-    );
+    // Backspace shares the third letter row with Shift: Shift at the left
+    // end, Backspace at the right end, the letters z..m between them.
+    final backspace = tester.getCenter(find.byIcon(Icons.backspace_outlined));
+    final shift = tester.getCenter(find.byIcon(Icons.arrow_upward_rounded));
+    final z = tester.getCenter(find.text('z'));
+    final m = tester.getCenter(find.text('m'));
+    expect(backspace.dy, closeTo(shift.dy, 1));
+    expect(z.dy, closeTo(shift.dy, 1));
+    expect(shift.dx, lessThan(z.dx));
+    expect(m.dx, lessThan(backspace.dx));
+    expect(tester.getCenter(find.text('p')).dy, lessThan(backspace.dy));
   });
 
   testWidgets(
