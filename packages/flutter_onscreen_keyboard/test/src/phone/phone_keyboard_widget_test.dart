@@ -207,6 +207,151 @@ void main() {
     expect(scrollable.bottom, greaterThan(keyboard.top));
   });
 
+  group('overlay keyboard and a field fixed near the bottom (#3339)', () {
+    // A 1920x1080 landscape screen with a search field in a bar fixed to the
+    // bottom of the page, like the HMI's log search under the Test Editor:
+    // nothing can scroll it above the keyboard.
+    Future<({FocusNode fixed, FocusNode top})> pumpFixedField(
+      WidgetTester tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1920, 1080);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final fixed = FocusNode();
+      final top = FocusNode();
+      addTearDown(fixed.dispose);
+      addTearDown(top.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: OnscreenKeyboard(
+            presentation: OnscreenKeyboardPresentation.overlay,
+            overlayDragEnabled: true,
+            suggestionBarHeight: 56,
+            child: Scaffold(
+              body: Column(
+                children: [
+                  OnscreenKeyboardTextField(
+                    key: const ValueKey('top-field'),
+                    focusNode: top,
+                  ),
+                  const Expanded(child: SizedBox.expand()),
+                  OnscreenKeyboardTextField(
+                    key: const ValueKey('fixed-field'),
+                    focusNode: fixed,
+                  ),
+                  const SizedBox(height: 330),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      return (fixed: fixed, top: top);
+    }
+
+    Rect fixedField(WidgetTester tester) =>
+        tester.getRect(find.byKey(const ValueKey('fixed-field')));
+    Rect keyboard(WidgetTester tester) =>
+        tester.getRect(find.byType(RawOnscreenKeyboard));
+
+    testWidgets('the keyboard moves off the focused fixed field', (
+      tester,
+    ) async {
+      await pumpFixedField(tester);
+      final fieldBefore = fixedField(tester);
+
+      await tester.tap(find.byKey(const ValueKey('fixed-field')));
+      await tester.pumpAndSettle();
+
+      final field = fixedField(tester);
+      final panel = keyboard(tester);
+      expect(field, fieldBefore, reason: 'the page is not resized or moved');
+      expect(
+        panel.bottom,
+        lessThanOrEqualTo(field.top - 11),
+        reason: 'the keyboard sits above the field, not over it',
+      );
+      expect(panel.top, greaterThanOrEqualTo(0));
+      expect(
+        tester
+            .hitTestOnBinding(field.center)
+            .path
+            .any(
+              (entry) =>
+                  entry.target ==
+                  tester.renderObject(find.byType(RawOnscreenKeyboard)),
+            ),
+        isFalse,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the operator position comes back for an uncovered field', (
+      tester,
+    ) async {
+      final nodes = await pumpFixedField(tester);
+      await tester.tap(find.byKey(const ValueKey('top-field')));
+      await tester.pumpAndSettle();
+      final restingTop = keyboard(tester).top;
+      expect(
+        restingTop,
+        lessThan(fixedField(tester).bottom),
+        reason: 'where the operator keeps it, the keyboard covers the field',
+      );
+
+      nodes.fixed.requestFocus();
+      await tester.pumpAndSettle();
+      expect(
+        keyboard(tester).bottom,
+        lessThanOrEqualTo(fixedField(tester).top),
+      );
+
+      nodes.top.requestFocus();
+      await tester.pumpAndSettle();
+      expect(keyboard(tester).top, closeTo(restingTop, .1));
+
+      nodes.fixed.requestFocus();
+      await tester.pumpAndSettle();
+      final keyboardState = OnscreenKeyboard.of(
+        tester.element(find.byKey(const ValueKey('fixed-field'))),
+      )..hide();
+      await tester.pumpAndSettle();
+      keyboardState.open();
+      await tester.pump();
+      expect(
+        keyboard(tester).bottom,
+        greaterThan(fixedField(tester).top),
+        reason: 'reopening starts from the operator position, then clears',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        keyboard(tester).bottom,
+        lessThanOrEqualTo(fixedField(tester).top),
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('dragging keeps the place the operator dragged to', (
+      tester,
+    ) async {
+      await pumpFixedField(tester);
+      await tester.tap(find.byKey(const ValueKey('fixed-field')));
+      await tester.pumpAndSettle();
+      final handle = find.byKey(
+        const ValueKey('onscreen_keyboard_overlay_drag_handle'),
+      );
+      final clearedTop = keyboard(tester).top;
+
+      await tester.drag(handle, const Offset(0, -40));
+      await tester.pumpAndSettle();
+
+      expect(keyboard(tester).top, lessThan(clearedTop - 20));
+      expect(keyboard(tester).top, greaterThan(clearedTop - 60));
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('overlay transition retargets without resizing the application', (
     tester,
   ) async {

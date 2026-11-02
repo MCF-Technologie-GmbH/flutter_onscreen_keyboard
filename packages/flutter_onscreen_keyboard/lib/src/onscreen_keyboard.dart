@@ -355,6 +355,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     }
     if (oldWidget.overlayDragEnabled && !widget.overlayDragEnabled) {
       _overlayVerticalPosition = 1;
+      _fieldClearancePosition = null;
     }
     if (widget.languageModel != oldWidget.languageModel ||
         widget.typingMode != oldWidget.typingMode ||
@@ -1235,36 +1236,44 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       fieldState.context,
       axis: Axis.vertical,
     );
-    if (renderObject == null || scrollable == null) return;
+    if (renderObject == null) return;
     if (widget.presentation == OnscreenKeyboardPresentation.overlay &&
         renderObject is RenderBox) {
       final surface = _phoneSurfaceKey.currentContext?.findRenderObject();
       if (surface is RenderBox) {
-        final fieldBottom = renderObject
-            .localToGlobal(
-              Offset(0, renderObject.size.height),
-              ancestor: surface,
-            )
-            .dy;
         final panelHeight = _phonePanelHeight(context, _resolveLayout());
-        final keyboardTop = _overlayTop(surface.size.height, panelHeight);
-        final overlap = fieldBottom - (keyboardTop - 12);
-        if (overlap > 0) {
-          final target = (scrollable.position.pixels + overlap).clamp(
-            scrollable.position.minScrollExtent,
-            scrollable.position.maxScrollExtent,
+        if (scrollable != null) {
+          final fieldBottom = renderObject
+              .localToGlobal(
+                Offset(0, renderObject.size.height),
+                ancestor: surface,
+              )
+              .dy;
+          final keyboardTop = _overlayTop(
+            surface.size.height,
+            panelHeight,
+            _overlayVerticalPosition,
           );
-          await scrollable.position.animateTo(
-            target,
-            duration: reducedMotion
-                ? Duration.zero
-                : const Duration(milliseconds: 180),
-            curve: const Cubic(.23, 1, .32, 1),
-          );
+          final overlap = fieldBottom - (keyboardTop - _fieldClearance);
+          if (overlap > 0) {
+            final target = (scrollable.position.pixels + overlap).clamp(
+              scrollable.position.minScrollExtent,
+              scrollable.position.maxScrollExtent,
+            );
+            await scrollable.position.animateTo(
+              target,
+              duration: reducedMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              curve: const Cubic(.23, 1, .32, 1),
+            );
+          }
         }
+        _keepFieldClearOfOverlay(field, renderObject, surface, panelHeight);
         return;
       }
     }
+    if (scrollable == null) return;
     await scrollable.position.ensureVisible(
       renderObject,
       duration: reducedMotion
@@ -1275,17 +1284,74 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     );
   }
 
+  /// Space kept between a focused field and the overlay keyboard.
+  static const double _fieldClearance = 12;
+
+  /// Moves the overlay keyboard off a focused field that scrolling could not
+  /// uncover, e.g. a field in a bar fixed to the bottom of the screen.
+  ///
+  /// The keyboard goes to the nearest position above or below the field where
+  /// it covers no part of it. This placement is temporary: the operator's own
+  /// position comes back when the keyboard closes or the next focused field
+  /// does not need it, and dragging the keyboard keeps the place it was
+  /// dragged to.
+  void _keepFieldClearOfOverlay(
+    OnscreenKeyboardFieldState field,
+    RenderBox fieldBox,
+    RenderBox surface,
+    double panelHeight,
+  ) {
+    if (!mounted || field != activeTextField || !fieldBox.attached) return;
+    final fieldTop = fieldBox.localToGlobal(Offset.zero, ancestor: surface).dy;
+    final fieldBottom = fieldBox
+        .localToGlobal(Offset(0, fieldBox.size.height), ancestor: surface)
+        .dy;
+    final surfaceHeight = surface.size.height;
+    final travel = math.max(0, surfaceHeight - panelHeight).toDouble();
+    bool covers(double top) =>
+        fieldBottom > top - _fieldClearance &&
+        fieldTop < top + panelHeight + _fieldClearance;
+    final preferredTop = _overlayTop(
+      surfaceHeight,
+      panelHeight,
+      _overlayVerticalPosition,
+    );
+    double? clearance;
+    if (travel > 0 && covers(preferredTop)) {
+      final aboveTop = fieldTop - _fieldClearance - panelHeight;
+      final belowTop = fieldBottom + _fieldClearance;
+      final candidates =
+          [
+            if (aboveTop >= 0) aboveTop,
+            if (belowTop <= travel) belowTop,
+          ]..sort(
+            (a, b) =>
+                (a - preferredTop).abs().compareTo((b - preferredTop).abs()),
+          );
+      if (candidates.isNotEmpty) clearance = candidates.first / travel;
+    }
+    if (clearance != _fieldClearancePosition) {
+      setState(() => _fieldClearancePosition = clearance);
+    }
+  }
+
   @override
   void close() {
     _focusVisibilityTimer?.cancel();
     detachTextField();
-    setState(() => _visible = false);
+    setState(() {
+      _visible = false;
+      _fieldClearancePosition = null;
+    });
   }
 
   @override
   void hide() {
     _focusVisibilityTimer?.cancel();
-    setState(() => _visible = false);
+    setState(() {
+      _visible = false;
+      _fieldClearancePosition = null;
+    });
   }
 
   @override
@@ -1446,8 +1512,12 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   void setAlignment(Alignment alignment) {
     _alignListener.value = ((alignment.x + 1) / 2, (alignment.y + 1) / 2);
     final overlayPosition = ((alignment.y + 1) / 2).clamp(0.0, 1.0);
-    if (_overlayVerticalPosition != overlayPosition) {
-      setState(() => _overlayVerticalPosition = overlayPosition);
+    if (_overlayVerticalPosition != overlayPosition ||
+        _fieldClearancePosition != null) {
+      setState(() {
+        _overlayVerticalPosition = overlayPosition;
+        _fieldClearancePosition = null;
+      });
     }
   }
 
@@ -1946,13 +2016,28 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     );
   }
 
-  double _overlayTop(double surfaceHeight, double panelHeight) =>
-      math.max(0, surfaceHeight - panelHeight) * _overlayVerticalPosition;
+  double _overlayTop(
+    double surfaceHeight,
+    double panelHeight,
+    double position,
+  ) => math.max(0, surfaceHeight - panelHeight) * position;
 
+  /// Where the overlay keyboard is shown: the place the operator chose, or
+  /// for now the place that keeps a fixed focused field uncovered.
+  double get _effectiveOverlayPosition =>
+      _fieldClearancePosition ?? _overlayVerticalPosition;
+
+  /// Sets the operator's own keyboard position; it replaces a temporary
+  /// placement made to uncover a field.
   void _setOverlayVerticalPosition(double position) {
     final next = position.clamp(0.0, 1.0);
-    if (next == _overlayVerticalPosition) return;
-    setState(() => _overlayVerticalPosition = next);
+    if (next == _overlayVerticalPosition && _fieldClearancePosition == null) {
+      return;
+    }
+    setState(() {
+      _overlayVerticalPosition = next;
+      _fieldClearancePosition = null;
+    });
   }
 
   void _endOverlayDrag() {
@@ -1961,7 +2046,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   String _overlayPositionLabel(double delta) {
-    final position = (_overlayVerticalPosition + delta).clamp(0.0, 1.0);
+    final position = (_effectiveOverlayPosition + delta).clamp(0.0, 1.0);
     return '${(position * 100).round()}% from top';
   }
 
@@ -1974,11 +2059,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
       decreasedValue: _overlayPositionLabel(-.1),
       slider: true,
       onIncrease: () {
-        _setOverlayVerticalPosition(_overlayVerticalPosition + .1);
+        _setOverlayVerticalPosition(_effectiveOverlayPosition + .1);
         _ensureActiveFieldVisible();
       },
       onDecrease: () {
-        _setOverlayVerticalPosition(_overlayVerticalPosition - .1);
+        _setOverlayVerticalPosition(_effectiveOverlayPosition - .1);
         _ensureActiveFieldVisible();
       },
       child: ValueListenableBuilder<bool>(
@@ -1995,7 +2080,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
             onVerticalDragUpdate: (details) {
               if (availableTravel <= 0) return;
               _setOverlayVerticalPosition(
-                _overlayVerticalPosition + details.delta.dy / availableTravel,
+                _effectiveOverlayPosition + details.delta.dy / availableTravel,
               );
             },
             onVerticalDragEnd: (_) => _endOverlayDrag(),
@@ -2034,7 +2119,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
         .max(0, media.size.height - targetHeight)
         .toDouble();
     final restingTranslation =
-        -availableTravel * (1 - _overlayVerticalPosition);
+        -availableTravel * (1 - _effectiveOverlayPosition);
     return TweenAnimationBuilder<double>(
       duration: reducedMotion
           ? Duration.zero
@@ -2180,6 +2265,10 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   final GlobalKey _phoneSurfaceKey = GlobalKey();
   static const double _overlayDragHandleHeight = 28;
   double _overlayVerticalPosition = 1;
+
+  /// Temporary overlay position that keeps a fixed focused field uncovered;
+  /// null while the keyboard sits where the operator placed it.
+  double? _fieldClearancePosition;
 
   /// Alignment of the keyboard
   final ValueNotifier<(double, double)> _alignListener = ValueNotifier((.5, 1));
