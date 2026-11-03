@@ -1982,7 +1982,13 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           : const Duration(milliseconds: 180),
       curve: const Cubic(.23, 1, .32, 1),
       tween: Tween(end: keyboardVisible ? targetHeight : 0),
-      builder: (context, inset, _) => Stack(
+      // Built once per keyboard build, not per slide frame: the tween only
+      // moves it. The Builder keeps reading the keyboard theme below this
+      // state.
+      child: Builder(
+        builder: (context) => _buildDockedPanel(context, resolvedLayout),
+      ),
+      builder: (context, inset, panel) => Stack(
         key: _phoneSurfaceKey,
         fit: StackFit.expand,
         children: [
@@ -2006,7 +2012,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                   alignment: Alignment.topCenter,
                   minHeight: targetHeight,
                   maxHeight: targetHeight,
-                  child: _buildDockedPanel(context, resolvedLayout),
+                  child: panel,
                 ),
               ),
             ),
@@ -2126,7 +2132,19 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
           : const Duration(milliseconds: 180),
       curve: const Cubic(.23, 1, .32, 1),
       tween: Tween(end: keyboardVisible ? 1 : 0),
-      builder: (context, progress, _) => LayoutBuilder(
+      // Built once per keyboard build, not per slide frame: the tween only
+      // moves it and updates the covered area. The Builder keeps reading the
+      // keyboard theme below this state.
+      child: Builder(
+        builder: (context) => _buildDockedPanel(
+          context,
+          resolvedLayout,
+          overlayHandle: widget.overlayDragEnabled
+              ? _buildOverlayDragHandle(context, availableTravel)
+              : null,
+        ),
+      ),
+      builder: (context, progress, panel) => LayoutBuilder(
         builder: (context, constraints) {
           final translation =
               restingTranslation +
@@ -2147,13 +2165,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                 )
               : Rect.zero;
           return _buildOverlaySurface(
-            context,
-            resolvedLayout,
+            panel!,
             media: media,
             covered: covered,
             translation: translation,
             targetHeight: targetHeight,
-            availableTravel: availableTravel,
             keyboardVisible: keyboardVisible,
           );
         },
@@ -2162,13 +2178,11 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
   }
 
   Widget _buildOverlaySurface(
-    BuildContext context,
-    KeyboardLayout resolvedLayout, {
+    Widget panel, {
     required MediaQueryData media,
     required Rect covered,
     required double translation,
     required double targetHeight,
-    required double availableTravel,
     required bool keyboardVisible,
   }) => Stack(
     key: _phoneSurfaceKey,
@@ -2190,13 +2204,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                 ignoring: !keyboardVisible,
                 child: ExcludeSemantics(
                   excluding: !keyboardVisible,
-                  child: _buildDockedPanel(
-                    context,
-                    resolvedLayout,
-                    overlayHandle: widget.overlayDragEnabled
-                        ? _buildOverlayDragHandle(context, availableTravel)
-                        : null,
-                  ),
+                  child: panel,
                 ),
               ),
             ),
