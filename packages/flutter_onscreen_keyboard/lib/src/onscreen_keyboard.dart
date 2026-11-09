@@ -13,6 +13,7 @@ import 'package:flutter_onscreen_keyboard/src/constants/action_key_type.dart';
 import 'package:flutter_onscreen_keyboard/src/theme/onscreen_keyboard_theme.dart';
 import 'package:flutter_onscreen_keyboard/src/types.dart';
 import 'package:flutter_onscreen_keyboard/src/utils/extensions.dart';
+import 'package:flutter_onscreen_keyboard/src/widgets/focused_field_tap_region.dart';
 
 part 'onscreen_keyboard_controller.dart';
 part 'onscreen_keyboard_field_state.dart';
@@ -2222,7 +2223,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
     final theme = context.theme;
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.3,
-      child: TextFieldTapRegion(
+      child: _KeyboardTapRegion(
         child: ColoredBox(
           color: theme.color ?? Theme.of(context).colorScheme.surfaceContainer,
           child: SafeArea(
@@ -2415,7 +2416,7 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
                                 ),
                               );
 
-                              final keyboard = TextFieldTapRegion(
+                              final keyboard = _KeyboardTapRegion(
                                 child: OnscreenKeyboardTheme(
                                   data:
                                       resolvedLayout.modes[_mode]!.theme?.call(
@@ -2649,4 +2650,17 @@ class _OnscreenKeyboardProvider extends InheritedWidget {
   @override
   bool updateShouldNotify(_OnscreenKeyboardProvider oldWidget) =>
       oldWidget.state != state;
+}
+
+/// The keyboard's tap regions: a tap on a key keeps the focused field
+/// focused ([TextFieldTapRegion]) and counts as inside every pop-up that holds
+/// the field ([FocusedFieldTapRegion]), so typing never closes that pop-up.
+class _KeyboardTapRegion extends StatelessWidget {
+  const _KeyboardTapRegion({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      TextFieldTapRegion(child: FocusedFieldTapRegion(child: child));
 }
