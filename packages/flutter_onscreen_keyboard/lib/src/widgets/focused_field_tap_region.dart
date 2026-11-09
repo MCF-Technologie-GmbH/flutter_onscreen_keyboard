@@ -1,3 +1,4 @@
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
 /// Makes a tap on the keyboard count as a tap inside every [TapRegion] group
@@ -49,13 +50,13 @@ class _FocusedFieldTapRegionState extends State<FocusedFieldTapRegion> {
   final GlobalKey _childKey = GlobalKey();
   List<Object> _groups = const [];
 
+  bool _updateScheduled = false;
+
   @override
   void initState() {
     super.initState();
     FocusManager.instance.addListener(_focusChanged);
-    _groups = FocusedFieldTapRegion.groupsAround(
-      FocusManager.instance.primaryFocus,
-    );
+    _focusChanged();
   }
 
   @override
@@ -64,13 +65,22 @@ class _FocusedFieldTapRegionState extends State<FocusedFieldTapRegion> {
     super.dispose();
   }
 
+  // The focused field's ancestors are read after the frame: during a build
+  // the field can sit in a part of the tree that is being moved or removed.
   void _focusChanged() {
-    if (!mounted) return;
-    final groups = FocusedFieldTapRegion.groupsAround(
-      FocusManager.instance.primaryFocus,
-    );
-    if (_sameGroups(groups, _groups)) return;
-    setState(() => _groups = groups);
+    if (_updateScheduled) return;
+    _updateScheduled = true;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        _updateScheduled = false;
+        if (!mounted) return;
+        final groups = FocusedFieldTapRegion.groupsAround(
+          FocusManager.instance.primaryFocus,
+        );
+        if (_sameGroups(groups, _groups)) return;
+        setState(() => _groups = groups);
+      })
+      ..ensureVisualUpdate();
   }
 
   static bool _sameGroups(List<Object> a, List<Object> b) {
