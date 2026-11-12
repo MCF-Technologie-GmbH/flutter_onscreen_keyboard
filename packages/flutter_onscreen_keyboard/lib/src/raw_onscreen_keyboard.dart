@@ -25,6 +25,7 @@ class RawOnscreenKeyboard extends StatefulWidget {
     this.onSwipeDataUpdate,
     this.onTapSample,
     this.onSpaceCursorMove,
+    this.onSpaceCursorModeChanged,
     this.onDeleteWord,
     this.feedback = const OnscreenKeyboardFeedback(),
   });
@@ -49,6 +50,10 @@ class RawOnscreenKeyboard extends StatefulWidget {
   final ValueChanged<OnscreenKeyboardSwipeData>? onSwipeDataUpdate;
   final ValueChanged<OnscreenKeyboardTapSample>? onTapSample;
   final ValueChanged<int>? onSpaceCursorMove;
+
+  /// Called with `true` when holding the space bar switches into cursor mode
+  /// and with `false` when it ends. The keyboard shows the mode itself.
+  final ValueChanged<bool>? onSpaceCursorModeChanged;
   final VoidCallback? onDeleteWord;
   final OnscreenKeyboardFeedback feedback;
 
@@ -68,7 +73,14 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
   Duration? _downTimestamp;
   bool _swiping = false;
   bool _dragging = false;
+  bool _spaceCursorMode = false;
   Timer? _swipePreviewTimer;
+
+  void _setSpaceCursorMode(bool active) {
+    if (_spaceCursorMode == active || !mounted) return;
+    setState(() => _spaceCursorMode = active);
+    widget.onSpaceCursorModeChanged?.call(active);
+  }
 
   bool get _hasSwipeHandler =>
       widget.onSwipe != null || widget.onSwipeData != null;
@@ -332,6 +344,8 @@ class _RawOnscreenKeyboardState extends State<RawOnscreenKeyboard> {
         suppressTap: () => _swiping || _dragging,
         onAlternate: widget.onAlternate,
         onCursorMove: key.primary == ' ' ? widget.onSpaceCursorMove : null,
+        onCursorModeChanged: key.primary == ' ' ? _setSpaceCursorMode : null,
+        cursorMode: _spaceCursorMode,
         onTapDown: () => widget.onKeyDown(key),
         onTapUp: () => widget.onKeyUp(key),
       ),

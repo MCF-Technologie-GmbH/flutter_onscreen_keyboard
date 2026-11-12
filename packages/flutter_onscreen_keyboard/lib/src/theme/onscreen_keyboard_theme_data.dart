@@ -297,10 +297,21 @@ class TextKeyThemeData extends KeyThemeData {
     super.boxShadow,
     super.gradient,
     this.textStyle,
+    this.cursorModeForegroundColor,
+    this.cursorModeIndicatorColor,
   });
 
   /// The text style used for rendering key labels.
   final TextStyle? textStyle;
+
+  /// Label color of the keys while the space bar moves the cursor (the
+  /// space bar is held and slid). Defaults to the key's foreground color at
+  /// 30 % opacity, so the letters visibly fade while the cursor mode is on.
+  final Color? cursorModeForegroundColor;
+
+  /// Color of the left/right arrows the space bar shows while it moves the
+  /// cursor. Defaults to the color scheme's primary color.
+  final Color? cursorModeIndicatorColor;
 
   /// Copies the current [TextKeyThemeData] with the provided changes.
   TextKeyThemeData copyWith({
@@ -315,6 +326,8 @@ class TextKeyThemeData extends KeyThemeData {
     List<BoxShadow>? boxShadow,
     Gradient? gradient,
     TextStyle? textStyle,
+    Color? cursorModeForegroundColor,
+    Color? cursorModeIndicatorColor,
   }) {
     return TextKeyThemeData(
       backgroundColor: backgroundColor ?? this.backgroundColor,
@@ -328,6 +341,10 @@ class TextKeyThemeData extends KeyThemeData {
       boxShadow: boxShadow ?? this.boxShadow,
       gradient: gradient ?? this.gradient,
       textStyle: textStyle ?? this.textStyle,
+      cursorModeForegroundColor:
+          cursorModeForegroundColor ?? this.cursorModeForegroundColor,
+      cursorModeIndicatorColor:
+          cursorModeIndicatorColor ?? this.cursorModeIndicatorColor,
     );
   }
 }
