@@ -18,6 +18,8 @@ class TextKeyWidget extends StatefulWidget {
     required this.feedback,
     this.onAlternate,
     this.onCursorMove,
+    this.onCursorModeChanged,
+    this.cursorMode = false,
     this.showSecondary = false,
     super.key,
   });
@@ -28,6 +30,13 @@ class TextKeyWidget extends StatefulWidget {
   final bool Function() suppressTap;
   final ValueChanged<String>? onAlternate;
   final ValueChanged<int>? onCursorMove;
+
+  /// Reports when holding this (space) key starts and ends the cursor mode.
+  final ValueChanged<bool>? onCursorModeChanged;
+
+  /// Whether the keyboard is in space-bar cursor mode: labels fade and the
+  /// space key shows left/right arrows.
+  final bool cursorMode;
   final bool showSecondary;
   final OnscreenKeyboardFeedback feedback;
 
@@ -77,6 +86,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         _spaceTracking = true;
         _lastSpacePosition = _downPosition;
         _removeKeyPreview();
+        widget.onCursorModeChanged?.call(true);
         if (widget.feedback.enableHaptics) {
           unawaited(HapticFeedback.mediumImpact());
         }
@@ -143,6 +153,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   }
 
   void _finish() {
+    if (_spaceTracking) widget.onCursorModeChanged?.call(false);
     _longPressTimer?.cancel();
     _longPressTimer = null;
     _spaceTrackTimer?.cancel();
@@ -285,7 +296,21 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final theme = context.theme.textKeyThemeData;
+    final foreground = theme.foregroundColor ?? colors.onSurface;
+    final showArrows = widget.cursorMode && widget.onCursorMove != null;
+    final dimmed = widget.cursorMode && !showArrows;
+    final dimmedColor =
+        theme.cursorModeForegroundColor ?? foreground.withValues(alpha: .3);
+    final labelStyle = dimmed
+        ? (theme.textStyle ?? const TextStyle()).copyWith(color: dimmedColor)
+        : theme.textStyle ?? TextStyle(color: theme.foregroundColor);
     Widget child = switch (widget.textKey.child) {
+      _ when showArrows => Padding(
+        padding: theme.padding ?? const EdgeInsets.all(10),
+        child: _cursorModeArrows(
+          theme.cursorModeIndicatorColor ?? colors.primary,
+        ),
+      ),
       Icon() => Padding(
         padding:
             theme.padding ??
@@ -300,7 +325,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
         padding: theme.padding ?? const EdgeInsets.all(10),
         child: Text(
           widget.textKey.getText(secondary: widget.showSecondary),
-          style: theme.textStyle ?? TextStyle(color: theme.foregroundColor),
+          style: labelStyle,
         ),
       ),
     };
@@ -335,7 +360,7 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
             child: IconTheme(
               data: IconThemeData(
                 size: theme.iconSize,
-                color: theme.foregroundColor ?? colors.onSurface,
+                color: dimmed ? dimmedColor : foreground,
               ),
               child: child,
             ),
@@ -344,6 +369,15 @@ class _TextKeyWidgetState extends State<TextKeyWidget> {
       ),
     );
   }
+
+  Widget _cursorModeArrows(Color color) => Row(
+    key: const ValueKey('onscreen-keyboard-space-cursor-mode'),
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(Icons.keyboard_arrow_left_rounded, color: color),
+      Icon(Icons.keyboard_arrow_right_rounded, color: color),
+    ],
+  );
 }
 
 class ActionKeyWidget extends StatefulWidget {
