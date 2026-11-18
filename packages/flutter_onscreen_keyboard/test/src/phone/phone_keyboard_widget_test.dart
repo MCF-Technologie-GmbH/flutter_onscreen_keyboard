@@ -207,6 +207,51 @@ void main() {
     expect(scrollable.bottom, greaterThan(keyboard.top));
   });
 
+  testWidgets(
+    'overlay keyboard jumps a covered field above its panel with reduced '
+    'motion (tapx-main-frontend#4223)',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(420, 640);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final focusNode = FocusNode();
+      addTearDown(focusNode.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: child!,
+          ),
+          home: OnscreenKeyboard(
+            presentation: OnscreenKeyboardPresentation.overlay,
+            child: Scaffold(
+              body: ListView(
+                children: [
+                  const SizedBox(height: 400),
+                  OnscreenKeyboardTextField(focusNode: focusNode),
+                  const SizedBox(height: 700),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+
+      focusNode.requestFocus();
+      // Reduced motion: no slide-in and no scroll animation, so a few frames
+      // run the zero-length timer and the post-frame scroll.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pump(const Duration(milliseconds: 1));
+
+      expect(tester.takeException(), isNull);
+      final field = tester.getRect(find.byType(OnscreenKeyboardTextField));
+      final keyboard = tester.getRect(find.byType(RawOnscreenKeyboard));
+      expect(field.bottom, lessThanOrEqualTo(keyboard.top - 11));
+    },
+  );
+
   group('overlay keyboard and a field fixed near the bottom (#3339)', () {
     // A 1920x1080 landscape screen with a search field in a bar fixed to the
     // bottom of the page, like the HMI's log search under the Test Editor:
