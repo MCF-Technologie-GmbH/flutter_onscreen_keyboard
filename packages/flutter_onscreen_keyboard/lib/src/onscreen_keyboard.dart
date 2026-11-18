@@ -1261,13 +1261,19 @@ class _OnscreenKeyboardState extends State<OnscreenKeyboard>
               scrollable.position.minScrollExtent,
               scrollable.position.maxScrollExtent,
             );
-            await scrollable.position.animateTo(
-              target,
-              duration: reducedMotion
-                  ? Duration.zero
-                  : const Duration(milliseconds: 180),
-              curve: const Cubic(.23, 1, .32, 1),
-            );
+            // A scroll animation refuses a zero duration, so reduced motion
+            // jumps straight to the target instead. The field's new place is
+            // known only after the next layout, which the check below reads.
+            if (reducedMotion) {
+              scrollable.position.jumpTo(target);
+              await WidgetsBinding.instance.endOfFrame;
+            } else {
+              await scrollable.position.animateTo(
+                target,
+                duration: const Duration(milliseconds: 180),
+                curve: const Cubic(.23, 1, .32, 1),
+              );
+            }
           }
         }
         _keepFieldClearOfOverlay(field, renderObject, surface, panelHeight);
